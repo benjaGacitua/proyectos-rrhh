@@ -13,11 +13,10 @@ DB_PASSWORD = os.getenv("SQL_PASSWORD")
 
 
 # --- Configuración API ---
-API_BASE_URL = "https://cramer.buk.cl/api/v1/chile/"
 API_ENDPOINTS = {
-    "licences": f"{API_BASE_URL}absences/licence",
-    "absences": f"{API_BASE_URL}absences/absence",
-    "permissions": f"{API_BASE_URL}absences/permission"
+    "licences": f"{os.getenv('API_BASE_URL')}absences/licence",
+    "absences": f"{os.getenv('API_BASE_URL')}absences/absence",
+    "permissions": f"{os.getenv('API_BASE_URL')}absences/permission"
 }
 
 # --- Configuración de Fechas ---
