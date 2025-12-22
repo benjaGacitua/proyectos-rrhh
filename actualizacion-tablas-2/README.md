@@ -1,31 +1,37 @@
-1. app/ (El corazón de tu código)
+# 🚀 (Sincronización API a SQL Server)
 
-Todo tu código Python vive aquí. Al tenerlo en una carpeta, es más limpio copiarlo dentro del contenedor Docker.
+Este sistema automatiza la extracción de datos desde la API de la plataforma de Recursos Humanos y la carga en una base de datos SQL Server. 
 
-main.py: Este archivo será el director de orquesta. Importará las funciones de extract, transform y load y las ejecutará en orden. Es el archivo que Docker ejecutará al iniciarse (CMD ["python", "app/main.py"]).
+El sistema soporta **Always Encrypted** de SQL Server mediante el uso de drivers ODBC 18 en un entorno Dockerizado Linux.
 
-config/settings.py: Aquí leeremos las variables de entorno (como la URL de la API o la contraseña de SQL Server). Esto es vital para Docker, ya que no queremos contraseñas escritas directamente en el código.
+---
 
-2. app/etl/ (Modularización)
+## 📋 Requisitos del Sistema
 
-Aquí es donde dividimos tu script gigante en piezas manejables:
+* **Docker** y **Docker Compose** instalados en la máquina anfitriona.
+* Acceso a la API de origen (Token).
+* Certificado `.pfx` para la desencriptación de columnas sensibles.
 
-extract.py: Solo se preocupa de conectarse a la API, manejar la paginación y obtener el JSON crudo.
+---
 
-transform.py: Recibe el JSON, lo limpia, cambia formatos de fecha, maneja nulos, etc. (idealmente usando Pandas si son muchos datos).
+## ⚙️ Configuración del Entorno
 
-load.py: Recibe los datos limpios y se encarga de enviarlos a la base de datos.
+Antes de ejecutar el contenedor, es necesario configurar las credenciales y certificados de seguridad.
 
-3. app/utils/
+### 1. Variables de Entorno (.env)
+Crea un archivo `.env` en la raíz del proyecto basándote en las variables requeridas en `app/config/settings.py`:
 
-db_client.py: Aquí configuras la conexión con pyodbc o sqlalchemy. Al separarlo, si mañana cambias de base de datos, solo tocas este archivo.
+```properties
+# Credenciales de API
+TOKEN=tu_token_api
+API_BASE_URL=[https://api.ejemplo.com/v1/](https://api.ejemplo.com/v1/)
 
-logger.py: En Docker, ver los errores es crucial. Aquí configuras cómo se imprimen los mensajes para poder leerlos con docker logs.
+# Base de Datos SQL Server
+SQL_SERVER=tuserver.database.windows.net
+SQL_DATABASE=IARRHH
+SQL_USER=tu_usuario
+SQL_PASSWORD=tu_password
 
-4. Archivos de Raíz (Root)
-
-Dockerfile: Definirá que usaremos una imagen base de Python (versión Linux), instalaremos los drivers de SQL Server (ODBC) y copiaremos la carpeta app.
-
-.env: Aquí guardarás tus credenciales. Importante: Este archivo nunca se sube al repositorio (para eso está el .gitignore), pero tus colegas crearán el suyo propio basándose en un ejemplo.
-
-requirements.txt: Generado con pip freeze > requirements.txt. Asegura que el contenedor tenga las mismas librerías que tú.
+# Seguridad (Certificados para Always Encrypted)
+PFX_PASSWORD=PassDelCertificadoExportado
+CERT_THUMBPRINT=A1B2C3D4E5F67890
