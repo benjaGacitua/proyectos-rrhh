@@ -1,6 +1,13 @@
+# ... (tu contenido actual)
 .env
-__pycache__/
 logs/
+__pycache__/
 venv/
 .DS_Store
-estado_sincronizacion
+estado_sincronizacion.json
+
+# AGREGAR ESTO:
+certs/
+*.pfx
+*.pem
+*.key

@@ -8,7 +8,7 @@ from app.config import settings
 from app.utils.logger import setup_logger
 from app.utils.db_client import get_db_connection
 from app.etl import extract, load, create, update
-from app.utils.estado import cargar_estado, guardar_estado, tarea_ya_completada, marcar_tarea
+from app.utils.estado import tarea_ya_completada, marcar_tarea
 
 
 logger = setup_logger(__name__)

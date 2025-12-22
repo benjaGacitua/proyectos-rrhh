@@ -10,13 +10,13 @@ DB_SERVER = os.getenv("SQL_SERVER")
 DB_NAME = os.getenv("SQL_DATABASE")
 DB_USER = os.getenv("SQL_USER")
 DB_PASSWORD = os.getenv("SQL_PASSWORD")
-
+API_BASE_URL = os.getenv("API_BASE_URL")
 
 # --- Configuración API ---
 API_ENDPOINTS = {
-    "licences": f"{os.getenv('API_BASE_URL')}absences/licence",
-    "absences": f"{os.getenv('API_BASE_URL')}absences/absence",
-    "permissions": f"{os.getenv('API_BASE_URL')}absences/permission"
+    "licences": f"{API_BASE_URL}absences/licence",
+    "absences": f"{API_BASE_URL}absences/absence",
+    "permissions": f"{API_BASE_URL}absences/permission"
 }
 
 # --- Configuración de Fechas ---
