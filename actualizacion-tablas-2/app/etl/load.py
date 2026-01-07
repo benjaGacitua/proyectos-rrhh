@@ -363,3 +363,87 @@ def cargar_datos_areas(conexion, areas_datos):
     finally:
         cursor.close()
 
+#! /// Load de tabla vacaciones --> Relacionada con función extract.obtener_datos_vacaciones ///
+def cargar_datos_vacaciones(conexion, vacaciones_datos):
+    
+    if not vacaciones_datos:
+        print("No hay datos para cargar.")
+        return 
+
+    cursor = conexion.cursor()
+    print(f"Iniciando carga de {len(vacaciones_datos)} registros en BD...")
+    
+    # Contadores
+    stats = {"insert": 0, "update": 0, "error": 0}
+
+    def limpiar_fecha(fecha_str):
+        if not fecha_str or str(fecha_str).strip() == '':
+            return None
+
+        return fecha_str
+    
+    sql_update = """
+        UPDATE dbo.vacations SET
+            status = ?,
+            approved_by_id = ?,
+            approved_at = ?,
+            workday_stage = ?,
+            updated_at_local = GETDATE()
+        WHERE external_id = ?
+    """
+    
+    sql_insert = """
+        INSERT INTO dbo.vacations (
+            external_id, employee_id, approved_by_id, working_days, calendar_days,
+            workday_stage, start_date, end_date, requested_at, approved_at,
+            type, status, vacation_type_id, created_at_local
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+    """
+
+    for vac in vacaciones_datos:
+        try:
+            approved_by = vac.get('approved_by_id')
+            if approved_by == 0:
+                approved_by = None
+
+            approved_at = vac.get('approved_at')
+            if approved_at == '': 
+                approved_at = None
+
+            start_date_clean = limpiar_fecha(vac.get('start_date'))
+            end_date_clean = limpiar_fecha(vac.get('end_date'))
+            requested_at_clean = limpiar_fecha(vac.get('requested_at'))
+            approved_at_clean = limpiar_fecha(vac.get('approved_at'))
+
+            # --- INTENTO DE INSERCIÓN ---
+            try:
+                cursor.execute(sql_insert, (
+                    vac['id'], vac['employee_id'], approved_by, vac['working_days'], vac['calendar_days'],
+                    vac['workday_stage'], start_date_clean, end_date_clean, requested_at_clean, approved_at_clean,
+                    vac['type'], vac['status'], vac['vacation_type_id']
+                ))
+                stats["insert"] += 1
+            
+            except Exception as e:
+                # Si entra aquí, es porque el ID ya existe (violación del índice UNIQUE)
+                if '23000' in str(e): #? El código 23000 en SQL es el error de violación de integridad 
+                    cursor.execute(sql_update, (
+                        vac['status'], approved_by, approved_at_clean, vac['workday_stage'], 
+                        vac['id'] # WHERE external_id = id
+                    ))
+                    stats["update"] += 1
+                else:
+                    raise e
+
+        except Exception as e:  
+            print(f"Error procesando ID {vac.get('id')}: {e}")
+            stats["error"] += 1
+
+    try:
+        conexion.commit() # Un solo commit al final es mucho más rápido
+        print(f"\nCarga completada: {stats['insert']} Inserts, {stats['update']} Updates, {stats['error']} Errores.")
+    except Exception as e:
+        print(f"Error al hacer commit final: {e}")
+        conexion.rollback()
+    finally:
+        cursor.close()

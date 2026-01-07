@@ -51,7 +51,7 @@ def obtener_datos_paginados(endpoint_url: str, aplicar_filtro_fechas: bool = Fal
 
     logger.info(f"Extracción finalizada. Total registros: {len(todos_los_datos)}")
     return todos_los_datos
-#! \\\ Término de extracción tabla incidencias \\\
+#! \\\ ======================================================================================= \\\
 
 #! /// Llamada API employees ///
 def to_int_or_none(value):
@@ -184,7 +184,7 @@ def obtener_todos_los_empleados_filtrados(url_employees: str = settings.API_BASE
 
     logger.info(f"¡Paginación completada! Total de empleados filtrados: {len(empleados_filtrados)}")
     return empleados_filtrados
-#! \\\ Término de extracción tabla employees \\\
+#! \\\ ======================================================================================= \\\
 
 #! /// Extracción Actualización Tabla Incidencias ///
 #? La función que ejecuta se traspasó a upload.py
@@ -209,7 +209,7 @@ def queries_de_incidencias():
     except Exception as e:
         print(f"Error CRÍTICO durante la ejecución SQL: {e}")
         raise e 
-
+#! \\\ ======================================================================================= \\\
 
 #! /// Extracción Actualización de Áreas ///
 def obtener_datos_tabla_areas(url_areas: str = settings.API_BASE_URL):
@@ -265,7 +265,62 @@ def obtener_datos_tabla_areas(url_areas: str = settings.API_BASE_URL):
         
     print(f"[{time.strftime('%H:%M:%S')}] Extracción finalizada. Total áreas: {len(areas_filtradas)}")
     return areas_filtradas
+#! \\\ ======================================================================================= \\\
+
+#! /// Extracción Vacaciones ///
+def obtener_datos_vacaciones(url_vacaciones: str = settings.API_BASE_URL):
+
+    headers = {"auth_token": settings.TOKEN}
+    url_actual = url_vacaciones + "vacations"
+    vacaciones_obtenidas = []
+    pagina_actual = 1
     
+    print(f"Comenzando obtención de vacaciones: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    try:
+        while url_actual:
+            print(f"Procesando página {pagina_actual}...")
+            
+            respuesta = requests.get(url_actual, headers=headers, timeout=30)
+            respuesta.raise_for_status()
+            
+            respuesta_api = respuesta.json()
+            vacaciones_pagina = respuesta_api['data']
+            pagination_info = respuesta_api['pagination']
+
+            for vacaciones in vacaciones_pagina:
+                vacaciones_filtradas = {
+                    "id": vacaciones.get("id"),
+                    "employee_id": vacaciones.get("employee_id"),
+                    "approved_by_id": vacaciones.get("approved_by_id"),
+                    "working_days": vacaciones.get("working_days"),
+                    "calendar_days": vacaciones.get("calendar_days"),
+                    "workday_stage": vacaciones.get("workday_stage"),
+                    "start_date": vacaciones.get("start_date"),
+                    "end_date": vacaciones.get("end_date"),
+                    "requested_at": vacaciones.get("requested_at"),
+                    "approved_at": vacaciones.get("approved_at"),
+                    "type": vacaciones.get("type"),
+                    "status": vacaciones.get("status"),
+                    "vacation_type_id": vacaciones.get("vacation_type_id")
+                    }
+                vacaciones_obtenidas.append(vacaciones_filtradas)            
+            
+            print(f"Página {pagina_actual}: {len(vacaciones_pagina)} vacaciones procesadas")
+            
+            # Obtener la URL de la siguiente página
+            url_actual = pagination_info.get('next')
+            pagina_actual += 1
+            
+            # Pausa para no sobrecargar la API
+            time.sleep(0.5)
+        
+    except Exception as e:
+        print(f"Error crítico en extracción API: {e}")
+        return [] # Retornamos lista vacía en caso de error para no romper el flujo
+        
+    print(f"[{time.strftime('%H:%M:%S')}] Extracción finalizada. Total áreas: {len(vacaciones_filtradas)}")
+    return vacaciones_obtenidas
 
 
 
