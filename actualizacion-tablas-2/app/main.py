@@ -25,6 +25,7 @@ def main():
     empleados_filtrados_api = []
     datos_areas = None
     datos_tablas_genericas = {}
+    datos_vacaciones = []
     
     # =========================================================================
     #! 2. EXTRACCIÓN (Extract)
@@ -93,6 +94,22 @@ def main():
         except Exception as e:
             logger.error(f"Fallo crítico extracción áreas: {e}")
             marcar_tarea(nombre_tarea_areas, exito=False, error_msg=str(e))
+    
+    #? D. Extracción Vacaciones
+    nombre_tarea_vacaciones = 'extraccion_vacaciones'
+    if tarea_ya_completada(nombre_tarea_vacaciones):
+        logger.info(f"Saltando '{nombre_tarea_vacaciones}': Ya se completó hoy.")
+    else:
+        try:
+            logger.info("Extrayendo datos de vacaciones...")
+            datos_vacaciones = extract.obtener_datos_vacaciones(settings.API_BASE_URL) 
+
+            marcar_tarea(nombre_tarea_vacaciones, exito=True)
+            logger.info(f"Extracción de vacaciones completada.")
+        
+        except Exception as e:
+            logger.error(f"Fallo crítico extracción vacaciones: {e}")
+            marcar_tarea(nombre_tarea_vacaciones, exito=False, error_msg=str(e))
 
 
     #! =========================================================================
@@ -153,6 +170,23 @@ def main():
         except Exception as e:
             logger.error(f"Fallo en carga de áreas: {e}")
             marcar_tarea(nombre_tarea_carga_areas, exito=False, error_msg=str(e))
+
+    #? D. Carga de Tabla Vacaciones
+    nombre_tarea_carga_vacaciones = 'carga_vacaciones'
+    if tarea_ya_completada(nombre_tarea_carga_vacaciones):
+        logger.info(f"Saltando Carga Vacaciones: Ya se completó hoy.")
+
+    elif datos_vacaciones:
+        try:
+            logger.info("Iniciando Carga de Vacaciones...")
+            load.cargar_datos_vacaciones(conexion, datos_vacaciones)
+
+            marcar_tarea(nombre_tarea_carga_vacaciones, exito=True)
+            logger.info("Carga de vacaciones finalizada correctamente.")
+
+        except Exception as e:
+            logger.error(f"Fallo en carga de vacaciones: {e}")
+            marcar_tarea(nombre_tarea_carga_vacaciones, exito=False, error_msg=str(e))
 
 
     # =========================================================================
