@@ -5,26 +5,41 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# 1. Agregamos 'openssl' a la lista de instalación
-RUN apt-get update && apt-get install -y curl gnupg2 build-essential unixodbc-dev openssl \
-    && curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
-    && curl https://packages.microsoft.com/config/debian/12/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+# --- PASO 1: Instalar dependencias del sistema y GPG ---
+# Instalamos primero curl y gnupg para poder descargar las llaves después.
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg2 \
+    build-essential \
+    unixodbc-dev \
+    openssl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- PASO 2: Instalar Drivers de SQL Server (Método Manual y Seguro) ---
+# 1. Descargamos la llave y la guardamos en formato GPG
+# 2. Creamos el archivo .list MANUALMENTE con 'echo' para evitar errores de sintaxis o de 'sed'
+# 3. Instalamos
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+    && echo "deb [arch=amd64,arm64,armhf signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
     && ACCEPT_EULA=Y apt-get install -y msodbcsql18 \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
 
+# --- PASO 3: Dependencias de Python ---
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# --- PASO 4: Código fuente ---
 COPY . .
 
-# 2. Copiamos el script de entrada y le damos permisos de ejecución
+# --- PASO 5: Entrypoint y CMD ---
+# Verificamos si existe el archivo antes de darle permisos para evitar errores si no lo tienes localmente aún
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# 3. Definimos el script como punto de entrada
 ENTRYPOINT ["/entrypoint.sh"]
 
-# 4. El comando por defecto sigue siendo tu app
+# Asegúrate de que la ruta 'app/main.py' sea correcta respecto a tu estructura de carpetas
 CMD ["python", "app/main.py"]
