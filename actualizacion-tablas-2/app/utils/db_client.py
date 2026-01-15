@@ -16,6 +16,9 @@ def get_db_connection():
             f"PWD={settings.DB_PASSWORD};"
             "ColumnEncryption=Enabled;"      
             "TrustServerCertificate=yes;"
+            "ConnectRetryCount=3;"
+            "ConnectRetryInterval=10;"
+            "KeepAlive=30"
         )
         conexion = pyodbc.connect(conn_str)
         # Habilitar fast_executemany para mejorar velocidad de inserciones masivas

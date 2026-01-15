@@ -364,7 +364,7 @@ def cargar_datos_areas(conexion, areas_datos):
         cursor.close()
 
 #! /// Load de tabla vacaciones --> Relacionada con función extract.obtener_datos_vacaciones ///
-def cargar_datos_vacaciones(conexion, vacaciones_datos):
+def cargar_datos_vacaciones(conexion, vacaciones_datos, batch_size=50):
     
     if not vacaciones_datos:
         print("No hay datos para cargar.")
@@ -376,12 +376,6 @@ def cargar_datos_vacaciones(conexion, vacaciones_datos):
     # Contadores
     stats = {"insert": 0, "update": 0, "error": 0}
 
-    def limpiar_fecha(fecha_str):
-        if not fecha_str or str(fecha_str).strip() == '':
-            return None
-
-        return fecha_str
-    
     sql_update = """
         UPDATE dbo.vacations SET
             status = ?,
@@ -400,28 +394,46 @@ def cargar_datos_vacaciones(conexion, vacaciones_datos):
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
     """
 
-    for vac in vacaciones_datos:
+    def limpiar_fecha(fecha_str, es_solo_fecha=False):
+        if not fecha_str or str(fecha_str).strip() == '':
+            return None
+        
+        s = str(fecha_str).strip()
+        
+        if s == '' or s == '0000-00-00':
+            return None
+
+        s = s.replace('T', ' ').replace('Z', '')
+
+        if es_solo_fecha and len(s) >= 10:
+            return s[:10]
+        
+        if not es_solo_fecha and '.' in s:
+            s = s.split('.')[0]
+
+        return s
+
+    for index, vac in enumerate(vacaciones_datos):
         try:
             approved_by = vac.get('approved_by_id')
-            if approved_by == 0:
-                approved_by = None
+            if approved_by == 0: approved_by = None
 
-            approved_at = vac.get('approved_at')
-            if approved_at == '': 
-                approved_at = None
+            start_date_clean = limpiar_fecha(vac.get('start_date'), es_solo_fecha=True)
+            end_date_clean = limpiar_fecha(vac.get('end_date'), es_solo_fecha=True)
 
-            start_date_clean = limpiar_fecha(vac.get('start_date'))
-            end_date_clean = limpiar_fecha(vac.get('end_date'))
-            requested_at_clean = limpiar_fecha(vac.get('requested_at'))
-            approved_at_clean = limpiar_fecha(vac.get('approved_at'))
+            requested_at_clean = limpiar_fecha(vac.get('requested_at'), es_solo_fecha=False)
+            approved_at_clean = limpiar_fecha(vac.get('approved_at'), es_solo_fecha=False)
 
+            # Parámetros para el INSERT
+            params_insert = (
+                vac['id'], vac['employee_id'], approved_by, vac['working_days'], vac['calendar_days'],
+                vac['workday_stage'], start_date_clean, end_date_clean, requested_at_clean, approved_at_clean,
+                vac['type'], vac['status'], vac['vacation_type_id']
+            )
+            
             # --- INTENTO DE INSERCIÓN ---
             try:
-                cursor.execute(sql_insert, (
-                    vac['id'], vac['employee_id'], approved_by, vac['working_days'], vac['calendar_days'],
-                    vac['workday_stage'], start_date_clean, end_date_clean, requested_at_clean, approved_at_clean,
-                    vac['type'], vac['status'], vac['vacation_type_id']
-                ))
+                cursor.execute(sql_insert, params_insert)
                 stats["insert"] += 1
             
             except Exception as e:
@@ -434,9 +446,24 @@ def cargar_datos_vacaciones(conexion, vacaciones_datos):
                     stats["update"] += 1
                 else:
                     raise e
+            
+            if (index + 1) % batch_size == 0:
+                conexion.commit()
+                time.sleep(0.1) 
+                print(f"   ... Lote procesado: {index + 1} registros guardados.")
 
-        except Exception as e:  
-            print(f"Error procesando ID {vac.get('id')}: {e}")
+        except Exception as e:
+            # Detección específica de caída de red
+            msg_error = str(e)
+            if '08S01' in msg_error or 'Communication link failure' in msg_error:
+                print(f"¡ALERTA CRÍTICA! Se perdió la conexión en el registro {vac.get('id')}.")
+                print("Intenta reducir el tamaño del lote o revisar la VPN/Internet.")
+                # Aquí podrías implementar una lógica de reconexión si tuvieras la connection string
+                break # Rompemos el ciclo porque la conexión ya no sirve
+            
+            # Error de datos normal
+            print(f"\nERROR SQL - ID REGISTRO: {vac.get('id')}")
+            print(f"Mensaje Técnico: {e}")
             stats["error"] += 1
 
     try:

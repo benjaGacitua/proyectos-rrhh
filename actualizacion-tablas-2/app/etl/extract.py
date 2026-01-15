@@ -3,6 +3,9 @@ import time
 from pathlib import Path
 from app.utils.logger import setup_logger
 from app.config import settings
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 
 logger = setup_logger(__name__)
 
@@ -270,6 +273,18 @@ def obtener_datos_tabla_areas(url_areas: str = settings.API_BASE_URL):
 #! /// Extracción Vacaciones ///
 def obtener_datos_vacaciones(url_vacaciones: str = settings.API_BASE_URL):
 
+    retry_strategy = Retry(
+        total=3,  # Número de reintentos
+        backoff_factor=4,  # Tiempo de espera en segundos.
+        status_forcelist=[429, 500, 502, 503, 504], # Códigos a reintentar
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
+    )
+
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    http = requests.Session()
+    http.mount("https://", adapter)
+    http.mount("http://", adapter)
+
     headers = {"auth_token": settings.TOKEN}
     url_actual = url_vacaciones + "vacations"
     vacaciones_obtenidas = []
@@ -279,48 +294,63 @@ def obtener_datos_vacaciones(url_vacaciones: str = settings.API_BASE_URL):
     
     try:
         while url_actual:
-            print(f"Procesando página {pagina_actual}...")
-            
-            respuesta = requests.get(url_actual, headers=headers, timeout=30)
-            respuesta.raise_for_status()
-            
-            respuesta_api = respuesta.json()
-            vacaciones_pagina = respuesta_api['data']
-            pagination_info = respuesta_api['pagination']
+            try:
+                print(f"Procesando página {pagina_actual}...")
+                
+                respuesta = http.get(url_actual, headers=headers, timeout=60)
+                respuesta.raise_for_status()
+                
+                respuesta_api = respuesta.json()
+                vacaciones_pagina = respuesta_api['data']
+                pagination_info = respuesta_api['pagination']
 
-            for vacaciones in vacaciones_pagina:
-                vacaciones_filtradas = {
-                    "id": vacaciones.get("id"),
-                    "employee_id": vacaciones.get("employee_id"),
-                    "approved_by_id": vacaciones.get("approved_by_id"),
-                    "working_days": vacaciones.get("working_days"),
-                    "calendar_days": vacaciones.get("calendar_days"),
-                    "workday_stage": vacaciones.get("workday_stage"),
-                    "start_date": vacaciones.get("start_date"),
-                    "end_date": vacaciones.get("end_date"),
-                    "requested_at": vacaciones.get("requested_at"),
-                    "approved_at": vacaciones.get("approved_at"),
-                    "type": vacaciones.get("type"),
-                    "status": vacaciones.get("status"),
-                    "vacation_type_id": vacaciones.get("vacation_type_id")
-                    }
-                vacaciones_obtenidas.append(vacaciones_filtradas)            
-            
-            print(f"Página {pagina_actual}: {len(vacaciones_pagina)} vacaciones procesadas")
-            
-            # Obtener la URL de la siguiente página
-            url_actual = pagination_info.get('next')
-            pagina_actual += 1
-            
-            # Pausa para no sobrecargar la API
-            time.sleep(0.5)
+                for vacaciones in vacaciones_pagina:
+                    vacaciones_filtradas = {
+                        "id": vacaciones.get("id"),
+                        "employee_id": vacaciones.get("employee_id"),
+                        "approved_by_id": vacaciones.get("approved_by_id"),
+                        "working_days": vacaciones.get("working_days"),
+                        "calendar_days": vacaciones.get("calendar_days"),
+                        "workday_stage": vacaciones.get("workday_stage"),
+                        "start_date": vacaciones.get("start_date"),
+                        "end_date": vacaciones.get("end_date"),
+                        "requested_at": vacaciones.get("requested_at"),
+                        "approved_at": vacaciones.get("approved_at"),
+                        "type": vacaciones.get("type"),
+                        "status": vacaciones.get("status"),
+                        "vacation_type_id": vacaciones.get("vacation_type_id")
+                        }
+                    vacaciones_obtenidas.append(vacaciones_filtradas)            
+                
+                print(f"Página {pagina_actual}: {len(vacaciones_pagina)} vacaciones procesadas")
+                
+                # Obtener la URL de la siguiente página
+                url_actual = pagination_info.get('next')
+                pagina_actual += 1
+                
+                # Pausa para no sobrecargar la API
+                time.sleep(0.5)
+
+            except requests.exceptions.HTTPError as errh:
+                print(f"\nError HTTP en pág {pagina_actual}: {errh}")
+                # Si fallan los 3 reintentos, rompemos el bucle pero NO la función
+                break 
+            except requests.exceptions.ConnectionError as errc:
+                print(f"\nError de Conexión en pág {pagina_actual}: {errc}")
+                break
+            except requests.exceptions.Timeout as errt:
+                print(f"\nTimeout en pág {pagina_actual}: {errt}")
+                break
+            except Exception as e:
+                print(f"\nError inesperado en pág {pagina_actual}: {e}")
+                break
         
-    except Exception as e:
-        print(f"Error crítico en extracción API: {e}")
-        return [] # Retornamos lista vacía en caso de error para no romper el flujo
+    except Exception as e_critico:
+        print(f"\nError crítico global: {e_critico}")
         
-    print(f"[{time.strftime('%H:%M:%S')}] Extracción finalizada. Total áreas: {len(vacaciones_filtradas)}")
+    print(f"\n[{time.strftime('%H:%M:%S')}] Extracción finalizada (o interrumpida).")
+    print(f"Total registros rescatados: {len(vacaciones_obtenidas)}")
+    
     return vacaciones_obtenidas
-
 
 
