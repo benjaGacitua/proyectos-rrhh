@@ -72,8 +72,6 @@ def ejecutar_flujo_etl(nombre_entidad, funcion_extraccion, funcion_carga, conexi
 
                 funcion_carga(conexion_temporal, lote)
 
-                conexion_temporal.close()
-
                 time.sleep(1)
 
             except Exception as e:

@@ -81,7 +81,7 @@ def main():
                 nombre_entidad="vacaciones",
                 funcion_extraccion=lambda: extract.obtener_datos_vacaciones(settings.API_BASE_URL),
                 funcion_carga=load.cargar_datos_vacaciones, # Asumiendo firma: (conexion, data)
-                conexion_db=lambda: get_db_connection()
+                conexion_db=conexion
             )
             
             if exito_vac:
