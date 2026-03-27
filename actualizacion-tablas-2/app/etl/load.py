@@ -28,6 +28,7 @@ def _obtener_archivo_errores_mas_reciente(entidad: str):
     archivos = sorted(base_dir.glob(f"errores_{entidad}_*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     return archivos[0] if archivos else None
 
+
 def reintentar_errores_entidad(conexion, entidad: str, max_registros: int = None):
     """
     Reintenta filas fallidas persistidas en JSONL para una entidad.
@@ -472,7 +473,6 @@ def job_sincronizar_empleados(empleados_filtrados_api: list, conexion):
         logger.info("Cursor cerrado.")
 
     logger.info(f"SINCRONIZACIÓN FINALIZADA: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-
 
 #! /// Load de tabla areas --> Relacionada con función extract.obtener_datos_tabla_areas ///
 def cargar_datos_areas(conexion, areas_datos):

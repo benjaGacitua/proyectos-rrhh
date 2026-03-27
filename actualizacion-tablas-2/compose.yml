@@ -1,0 +1,10 @@
+services:
+  etl-app:
+    container_name: rh_cramer_etl
+    image: rh_cramer_etl:latest
+    build: .
+    restart: "no"
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs

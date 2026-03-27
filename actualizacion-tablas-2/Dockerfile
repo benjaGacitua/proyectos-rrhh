@@ -34,12 +34,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # --- PASO 4: Código fuente ---
 COPY . .
 
-# --- PASO 5: Entrypoint y CMD ---
-# Verificamos si existe el archivo antes de darle permisos para evitar errores si no lo tienes localmente aún
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-ENTRYPOINT ["/entrypoint.sh"]
-
-# Asegúrate de que la ruta 'app/main.py' sea correcta respecto a tu estructura de carpetas
+# --- PASO 5: Comando de ejecución ---
 CMD ["python", "app/main.py"]

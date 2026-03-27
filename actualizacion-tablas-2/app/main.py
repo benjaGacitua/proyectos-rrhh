@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import settings
 from app.utils.logger import setup_logger
 from app.utils.db_client import get_db_connection
-from app.etl import extract, load, create
+from app.etl import extract, load, create, contract_alerts
 from app.utils.estado import tarea_ya_completada, marcar_tarea
 from app.utils.etl_core import ejecutar_flujo_etl
 
@@ -134,6 +134,27 @@ def main():
                     exito=False,
                     error_msg="Falló la extracción de uno o más endpoints de incidencias.",
                 )
+
+        # =========================================================================
+        # BLOQUE 5: ALERTAS DE CONTRATO
+        # =========================================================================
+        tarea_alertas = "etl_completo_contract_alerts"
+
+        if tarea_ya_completada(tarea_alertas):
+            logger.info(f"Saltando '{tarea_alertas}': Ya se completó hoy.")
+        else:
+            try:
+                resultado = contract_alerts.generar_alertas_contrato(conexion)
+                logger.info(
+                    "Generación de alertas de contrato completada. "
+                    f"Procesados: {resultado.get('procesados', 0)}, "
+                    f"Alertas: {resultado.get('alertas', 0)}, "
+                    f"Errores: {resultado.get('errores', 0)}."
+                )
+                marcar_tarea(tarea_alertas, exito=True)
+            except Exception as e:
+                logger.error(f"Fallo en generación de alertas de contrato: {e}")
+                marcar_tarea(tarea_alertas, exito=False, error_msg=str(e))
 
     finally:
         # Cierre seguro de conexión
