@@ -23,15 +23,19 @@ def cargar_estado():
     if not os.path.exists(ARCHIVO_ESTADO):
         return {}
     try:
-        with open(ARCHIVO_ESTADO, 'r') as f:
+        with open(ARCHIVO_ESTADO, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}
 
 def guardar_estado(estado):
     """Guarda el diccionario de estado en el archivo JSON."""
-    with open(ARCHIVO_ESTADO, 'w') as f:
-        json.dump(estado, f, indent=4)
+    os.makedirs(os.path.dirname(ARCHIVO_ESTADO), exist_ok=True)
+    # Escritura "in-place" (mismo archivo) para que editores/FS watchers refresquen bien.
+    with open(ARCHIVO_ESTADO, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(estado, f, indent=4, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
 
 def tarea_ya_completada(nombre_tarea):
     """

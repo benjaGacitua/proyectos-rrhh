@@ -4,13 +4,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- Credenciales y Base de Datos ---
+# --- Credenciales API ---
 TOKEN = os.getenv("TOKEN")
-DB_SERVER = os.getenv("SQL_SERVER")
-DB_NAME = os.getenv("SQL_DATABASE")
-DB_USER = os.getenv("SQL_USER")
-DB_PASSWORD = os.getenv("SQL_PASSWORD")
 API_BASE_URL = os.getenv("API_BASE_URL")
+
+# --- Credenciales Postgres vía túnel SSH ---
+SSH_HOST = os.getenv("SSH_HOST")
+SSH_PORT = int(os.getenv("SSH_PORT", "22"))
+SSH_USER = os.getenv("SSH_USER")
+SSH_PASSWORD = os.getenv("SSH_PASSWORD")
+SSH_PRIVATE_KEY = os.getenv("SSH_PRIVATE_KEY")
+SSH_PRIVATE_KEY_PASSWORD = os.getenv("SSH_PRIVATE_KEY_PASSWORD")
+
+# --- Credenciales Postgres ---
+PG_HOST = os.getenv("PG_HOST", "127.0.0.1")
+PG_PORT = int(os.getenv("PG_PORT", "5432"))
+PG_DATABASE = os.getenv("PG_DATABASE")
+PG_USER = os.getenv("PG_USER")
+PG_PASSWORD = os.getenv("PG_PASSWORD")
+
 
 # --- Configuración API ---
 API_ENDPOINTS = {
@@ -20,7 +32,7 @@ API_ENDPOINTS = {
 }
 
 # --- Configuración de Fechas ---
-FILTRAR_POR_FECHAS = True # Cambiar a False si quieres traer todo
+FILTRAR_POR_FECHAS = False # Cambiar a False si quieres traer todo
 
 fecha_hoy = datetime.now().date()
 fecha_inicio_objetivo = fecha_hoy - timedelta(days=7)
