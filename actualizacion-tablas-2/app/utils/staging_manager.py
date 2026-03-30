@@ -1,50 +1,49 @@
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 CARPETA_TEMP = os.getenv("STAGING_DIR", "/app/staging")
 
-def obtener_ruta_archivo(nombre_entidad):
-    """
-    Genera la ruta completa: temp/staging_vacaciones.json
-    Y se asegura de que la carpeta exista.
-    """
-    if not os.path.exists(CARPETA_TEMP):
-        os.makedirs(CARPETA_TEMP)
-        print(f"Carpeta '{CARPETA_TEMP}' creada.")
 
-    nombre_archivo = f"staging_{nombre_entidad}.json"
-    
-    return os.path.join(CARPETA_TEMP, nombre_archivo)
+def _garantizar_directorio():
+    os.makedirs(CARPETA_TEMP, exist_ok=True)
+
 
 def guardar_temporal(nombre_entidad, datos):
-    ruta_completa = obtener_ruta_archivo(nombre_entidad)
-    
+    _garantizar_directorio()
+    ruta = os.path.join(CARPETA_TEMP, f"staging_{nombre_entidad}.json")
     try:
-        with open(ruta_completa, 'w', encoding='utf-8') as f:
+        with open(ruta, "w", encoding="utf-8") as f:
             json.dump(datos, f, ensure_ascii=False, indent=4, default=str)
-        print(f"[{nombre_entidad.upper()}] Datos guardados en '{ruta_completa}'.")
+        logger.info(f"[{nombre_entidad.upper()}] Staging guardado ({len(datos)} registros).")
         return True
     except Exception as e:
-        print(f"Error guardando staging para {nombre_entidad}: {e}")
+        logger.error(f"[{nombre_entidad.upper()}] Error guardando staging: {e}")
         return False
 
+
 def cargar_temporal(nombre_entidad):
-    ruta_completa = os.path.join(CARPETA_TEMP, f"staging_{nombre_entidad}.json")
-    if os.path.exists(ruta_completa):
-        try:
-            with open(ruta_completa, 'r', encoding='utf-8') as f:
-                datos = json.load(f)
-            print(f"[{nombre_entidad.upper()}] Recuperado desde caché local ({len(datos)} registros).")
-            return datos
-        except Exception as e:
-            print(f"Archivo corrupto para {nombre_entidad}: {e}")
-    return None
+    ruta = os.path.join(CARPETA_TEMP, f"staging_{nombre_entidad}.json")
+    if not os.path.exists(ruta):
+        return None
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            datos = json.load(f)
+        logger.info(f"[{nombre_entidad.upper()}] Staging cargado desde caché ({len(datos)} registros).")
+        return datos
+    except Exception as e:
+        logger.error(f"[{nombre_entidad.upper()}] Archivo de staging corrupto: {e}")
+        return None
+
 
 def eliminar_temporal(nombre_entidad):
-    ruta_completa = os.path.join(CARPETA_TEMP, f"staging_{nombre_entidad}.json")
-    if os.path.exists(ruta_completa):
-        try:
-            os.remove(ruta_completa)
-            print(f"[{nombre_entidad.upper()}] Archivo temporal eliminado.")
-        except Exception as e:
-            print(f"No se pudo eliminar archivo de {nombre_entidad}: {e}")
+    ruta = os.path.join(CARPETA_TEMP, f"staging_{nombre_entidad}.json")
+    if not os.path.exists(ruta):
+        return
+    try:
+        os.remove(ruta)
+        logger.info(f"[{nombre_entidad.upper()}] Staging eliminado tras carga exitosa.")
+    except Exception as e:
+        logger.error(f"[{nombre_entidad.upper()}] No se pudo eliminar staging: {e}")

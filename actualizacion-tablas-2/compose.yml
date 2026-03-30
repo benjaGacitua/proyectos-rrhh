@@ -6,6 +6,9 @@ services:
     restart: on-failure:3
     env_file:
       - .env
+    environment:
+      - LOG_DIR=/app/logs
+      - STAGING_DIR=/app/staging
     volumes:
       - ./logs:/app/logs
       - ./staging:/app/staging

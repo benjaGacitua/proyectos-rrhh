@@ -1,69 +1,56 @@
 import json
+import logging
 import os
 from datetime import datetime
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(os.path.dirname(CURRENT_DIR))
-ARCHIVO_ESTADO = os.path.join(ROOT_DIR, "estado_sincronizacion.json")
-LOGS_DIR = os.path.join(ROOT_DIR, "logs")
+logger = logging.getLogger(__name__)
 
-def garantizar_directorios():
-    """Crea la carpeta de logs si no existe en la raíz."""
-    if not os.path.exists(LOGS_DIR):
-        try:
-            os.makedirs(LOGS_DIR, exist_ok=True)
-            print(f"Carpeta logs creada en: {LOGS_DIR}")
-        except Exception as e:
-            print(f"Error creando carpeta logs: {e}")
+STAGING_DIR = os.getenv("STAGING_DIR", "/app/staging")
+ARCHIVO_ESTADO = os.path.join(STAGING_DIR, "estado_sincronizacion.json")
 
-garantizar_directorios()
 
-def cargar_estado():
-    """Lee el archivo JSON. Si no existe, devuelve un diccionario vacío."""
+def _cargar_estado() -> dict:
     if not os.path.exists(ARCHIVO_ESTADO):
         return {}
     try:
         with open(ARCHIVO_ESTADO, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error leyendo estado_sincronizacion.json: {e}")
         return {}
 
-def guardar_estado(estado):
-    """Guarda el diccionario de estado en el archivo JSON."""
-    os.makedirs(os.path.dirname(ARCHIVO_ESTADO), exist_ok=True)
-    # Escritura "in-place" (mismo archivo) para que editores/FS watchers refresquen bien.
-    with open(ARCHIVO_ESTADO, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(estado, f, indent=4, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
 
-def tarea_ya_completada(nombre_tarea):
-    """
-    Verifica si una tarea se completó exitosamente HOY.
-    Devuelve True si ya está lista, False si hay que ejecutarla.
-    """
-    estado = cargar_estado()
-    info_tarea = estado.get(nombre_tarea)
-    
-    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+def _guardar_estado(estado: dict):
+    os.makedirs(STAGING_DIR, exist_ok=True)
+    try:
+        with open(ARCHIVO_ESTADO, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(estado, f, indent=4, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception as e:
+        logger.error(f"Error guardando estado_sincronizacion.json: {e}")
 
-    if info_tarea:
-        # Verificamos si está OK y si la fecha coincide con hoy
-        if info_tarea.get('status') == 'OK' and info_tarea.get('fecha') == fecha_hoy:
-            return True
-    
+
+def tarea_ya_completada(nombre_tarea: str) -> bool:
+    """Returns True if the task completed successfully today."""
+    estado = _cargar_estado()
+    info = estado.get(nombre_tarea)
+    if info and info.get("status") == "OK" and info.get("fecha") == datetime.now().strftime("%Y-%m-%d"):
+        return True
     return False
 
-def marcar_tarea(nombre_tarea, exito=True, error_msg=None):
-    """Actualiza el estado de una tarea."""
-    estado = cargar_estado()
-    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
-    
+
+def marcar_tarea(nombre_tarea: str, exito: bool = True, error_msg: str = None):
+    """Updates the status of a task in estado_sincronizacion.json."""
+    estado = _cargar_estado()
     estado[nombre_tarea] = {
-        "fecha": fecha_hoy,
+        "fecha": datetime.now().strftime("%Y-%m-%d"),
         "status": "OK" if exito else "ERROR",
         "ultimo_error": error_msg if not exito else None,
-        "updated_at": datetime.now().strftime('%H:%M:%S')
+        "updated_at": datetime.now().strftime("%H:%M:%S"),
     }
-    
-    guardar_estado(estado)
+    _guardar_estado(estado)
+    if exito:
+        logger.info(f"Tarea '{nombre_tarea}' marcada como OK.")
+    else:
+        logger.warning(f"Tarea '{nombre_tarea}' marcada como ERROR: {error_msg}")
