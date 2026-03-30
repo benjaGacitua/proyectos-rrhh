@@ -3,7 +3,7 @@ services:
     container_name: rh_cramer_etl
     image: rh_cramer_etl:latest
     build: .
-    restart: "no"
+    restart: on-failure:3
     env_file:
       - .env
     volumes:
