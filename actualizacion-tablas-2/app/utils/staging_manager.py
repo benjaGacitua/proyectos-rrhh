@@ -1,8 +1,7 @@
 import json
 import os
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CARPETA_TEMP = os.path.join(BASE_DIR, "temp")
+CARPETA_TEMP = os.getenv("STAGING_DIR", "/app/staging")
 
 def obtener_ruta_archivo(nombre_entidad):
     """

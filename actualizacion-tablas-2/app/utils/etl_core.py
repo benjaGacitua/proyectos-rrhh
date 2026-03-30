@@ -23,14 +23,9 @@ def ejecutar_flujo_etl(nombre_entidad, funcion_extraccion, funcion_carga, conexi
     datos_cache = staging.cargar_temporal(nombre_entidad)
     
     if datos_cache:
-        print(f"Se encontraron datos previos pendientes para '{nombre_entidad}'.")
-        # Aquí puedes poner un input() si quieres preguntar, 
-        # o asumimos 'True' para automatización.
-        usar_cache = input("¿Usar datos locales? (s/n): ").lower() == 's'
-        
-        if usar_cache:
-            datos_procesar = datos_cache
-            origen_datos = "CACHE"
+        print(f"Se encontraron datos previos pendientes para '{nombre_entidad}'. Usando caché local.")
+        datos_procesar = datos_cache
+        origen_datos = "CACHE"
     
     # 2. EXTRACCIÓN (Si no usamos caché)
     if not datos_procesar:
