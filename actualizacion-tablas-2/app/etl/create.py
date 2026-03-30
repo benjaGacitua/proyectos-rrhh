@@ -90,6 +90,8 @@ def garantizar_tablas_rh(conexion) -> bool:
             );
             """
         )
+
+        
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_consolidado_employee_id ON rh.consolidado_incidencias(employee_id);"
         )

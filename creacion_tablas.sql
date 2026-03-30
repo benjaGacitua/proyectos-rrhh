@@ -86,7 +86,7 @@ CREATE TABLE rh.vacations (
 CREATE INDEX idx_vacations_employee_id ON rh.vacations(employee_id);
 
 CREATE TABLE rh.contract_alerts (
-    employee_id INT REFERENCES rh.employees(id),
+    employee_id INT PRIMARY KEY REFERENCES rh.employees(id),
     rut VARCHAR(50),
     employee_name VARCHAR(255),
     employee_role VARCHAR(255),
