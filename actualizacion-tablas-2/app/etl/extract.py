@@ -10,14 +10,14 @@ from urllib3.util.retry import Retry
 
 logger = setup_logger(__name__)
 
-# /// Funciones auxiliares ///
+#Funciones auxiliares
 def construir_url_con_fechas(base_url: str, fecha_inicio: str = None, fecha_fin: str = None):
     if fecha_inicio and fecha_fin:
         separador = "&" if "?" in base_url else "?"
         return f"{base_url}{separador}from={fecha_inicio}&to={fecha_fin}"
     return base_url
 
-# /// Funciones auxiliares ///
+#Funciones auxiliares
 def to_int_or_none(value):
     """Convierte un valor a int, o devuelve None si no es válido."""
     if value is None:
@@ -29,7 +29,7 @@ def to_int_or_none(value):
         # Si falla (ej. es '', 'N/A', '-'), devuelve None
         return None
 
-# /// Funciones auxiliares ///
+#Funciones auxiliares
 def to_str_or_none(value, max_length=None):
     """Convierte un valor a str, o devuelve None si está vacío, nulo o es '-'.
     Si max_length está definido, trunca el string a ese tamaño."""
@@ -47,7 +47,7 @@ def to_str_or_none(value, max_length=None):
     except (ValueError, TypeError):
         return None
 
-# /// Funciones auxiliares ///
+#Funciones auxiliares
 def _to_date_str(value):
     if value is None:
         return None
@@ -59,7 +59,7 @@ def _to_date_str(value):
     except Exception:
         return None
 
-# /// Funciones auxiliares ///
+#Funciones auxiliares
 def _to_datetime_str(value):
     if value is None:
         return None
@@ -71,7 +71,7 @@ def _to_datetime_str(value):
     except Exception:
         return None
 
-# /// Funciones auxiliares ///
+#Funciones auxiliares
 def _calcular_dias_count(start_date, end_date):
     if not start_date or not end_date:
         return None
@@ -82,7 +82,7 @@ def _calcular_dias_count(start_date, end_date):
     except Exception:
         return None
 
-# /// Funciones auxiliares ///
+#Funciones auxiliares
 def normalizar_incidencia(registro: dict, nombre_endpoint: str = ""):
     endpoint = (nombre_endpoint or "").lower()
 

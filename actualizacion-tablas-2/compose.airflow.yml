@@ -1,0 +1,135 @@
+# Apache Airflow orchestration for the RH ETL pipeline.
+#
+# Usage:
+#   docker compose -f compose.airflow.yml up --build -d
+#
+# First run only — initialize the metadata DB and create the admin user:
+#   docker compose -f compose.airflow.yml up airflow-init
+#
+# Then start the scheduler and webserver:
+#   docker compose -f compose.airflow.yml up airflow-scheduler airflow-webserver -d
+#
+# Airflow UI: http://localhost:8080  (admin / admin)
+#
+# Prerequisites:
+#   - .env file with TOKEN, API_BASE_URL, SSH_*, PG_* variables.
+#   - AIRFLOW_SECRET_KEY set in .env (any random string).
+#   - Staging and log directories must be writable:
+#       mkdir -p staging logs
+
+x-airflow-common:
+  &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  env_file:
+    - .env
+  environment:
+    &airflow-env
+    # Executor: LocalExecutor runs tasks as subprocesses of the scheduler.
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+    # Dags folder points to the mounted app code.
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/app_src/app/dags
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-changeme_set_AIRFLOW_SECRET_KEY_in_env}
+    # PYTHONPATH lets DAG callables do "from app.config import settings" etc.
+    PYTHONPATH: /opt/airflow/app_src
+    # Keep same paths the ETL code expects for staging and logs.
+    STAGING_DIR: /app/staging
+    LOG_DIR: /app/logs
+  volumes:
+    # App source code (read-only) — parent dir is in PYTHONPATH so "app.*" imports work.
+    - ./app:/opt/airflow/app_src/app:ro
+    # load.py writes/deletes error JSONL files here — needs write access despite the :ro above.
+    - ./app/utils/temp:/opt/airflow/app_src/app/utils/temp
+    # Staging cache and task-state files (must be writable).
+    - ./staging:/app/staging
+    # Application-level log files.
+    - ./logs:/app/logs
+    # Airflow's own task-instance logs (separate from ETL logs).
+    - airflow_logs:/opt/airflow/logs
+  depends_on:
+    airflow-db:
+      condition: service_healthy
+
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Metadata database for Airflow (separate from the business PostgreSQL).
+  # ---------------------------------------------------------------------------
+  airflow-db:
+    image: postgres:15-alpine
+    container_name: rh_airflow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # One-time initialisation: runs DB migrations and creates the admin user.
+  # Run with: docker compose -f compose.airflow.yml up airflow-init
+  # ---------------------------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    container_name: rh_airflow_init
+    command: >-
+      bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname Admin --role Admin --email admin@localhost || true"
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Scheduler: discovers and triggers DAG runs using LocalExecutor.
+  # ---------------------------------------------------------------------------
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: rh_airflow_scheduler
+    command: airflow scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--hostname", "$${HOSTNAME}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Webserver: Airflow UI on port 8080.
+  # ---------------------------------------------------------------------------
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: rh_airflow_webserver
+    command: airflow webserver
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+
+volumes:
+  airflow_pgdata:
+  airflow_logs:
