@@ -154,7 +154,7 @@ with DAG(
     dag_id="etl_rh_cramer",
     default_args=default_args,
     description="ETL diario RH: BUK API → PostgreSQL vía túnel SSH",
-    schedule="0 2 * * 1-6",   # Lunes a viernes a las 02:00
+    schedule="0 2 * * 1-5",   # Lunes a viernes a las 02:00
     start_date=datetime(2026, 4, 1),
     catchup=False,
     tags=["rh", "etl"],

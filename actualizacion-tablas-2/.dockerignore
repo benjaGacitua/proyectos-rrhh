@@ -9,6 +9,8 @@ __pycache__/
 .mypy_cache/
 .cursor/
 logs/
+staging/
+app/utils/logs/
 app/utils/temp/
 agent-transcripts/
 terminals/

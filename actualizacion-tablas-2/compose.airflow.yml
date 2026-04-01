@@ -84,7 +84,7 @@ services:
     <<: *airflow-common
     container_name: rh_airflow_init
     command: >-
-      bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname Admin --role Admin --email admin@localhost || true"
+      bash -c "mkdir -p /app/staging /app/logs && chmod 777 /app/staging /app/logs && airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname Admin --role Admin --email admin@localhost || true"
     restart: "no"
 
   # ---------------------------------------------------------------------------
