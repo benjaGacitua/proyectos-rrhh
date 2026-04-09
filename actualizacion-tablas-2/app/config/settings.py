@@ -16,6 +16,9 @@ SSH_PASSWORD = os.getenv("SSH_PASSWORD")
 SSH_PRIVATE_KEY = os.getenv("SSH_PRIVATE_KEY")
 SSH_PRIVATE_KEY_PASSWORD = os.getenv("SSH_PRIVATE_KEY_PASSWORD")
 
+# --- Notificaciones n8n / Telegram ---
+N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")  # URL del webhook n8n 'airflow-etl-log'
+
 # --- Credenciales Postgres ---
 PG_HOST = os.getenv("PG_HOST", "127.0.0.1")
 PG_PORT = int(os.getenv("PG_PORT", "5432"))

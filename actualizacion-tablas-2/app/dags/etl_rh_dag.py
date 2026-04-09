@@ -7,15 +7,45 @@ Dependencias entre tareas:
                                         ├── etl_vacaciones
                                         ├── etl_incidencias
                                         └── etl_contract_alerts
+                                              └── notificar_resumen  (ALL_DONE)
 
 Todas las importaciones del dominio (app.*) se realizan dentro de cada
 callable para evitar ejecuciones en tiempo de parseo del DAG.
+
+Notificaciones Telegram:
+    - on_failure_callback en cada tarea → envía alerta inmediata vía n8n.
+    - Tarea final 'notificar_resumen' → envía resumen global del DAG run.
+    Requiere N8N_WEBHOOK_URL en .env apuntando al endpoint 'airflow-etl-log'.
 """
 
 from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.utils.trigger_rule import TriggerRule
+
+
+# =============================================================================
+# CALLBACKS DE NOTIFICACIÓN
+# =============================================================================
+
+def _callback_fallo(context):
+    """Envía alerta inmediata a Telegram cuando una tarea falla."""
+    from app.utils.telegram_notifier import notificar_tarea
+
+    ti = context["task_instance"]
+    exc = context.get("exception")
+    log_excerpt = f"{type(exc).__name__}: {exc}" if exc else "Sin detalle de excepción"
+
+    notificar_tarea(
+        state="failed",
+        dag_id=ti.dag_id,
+        task_id=ti.task_id,
+        run_id=context.get("run_id", "desconocido"),
+        try_number=ti.try_number,
+        ts=context.get("ts", ""),
+        log_excerpt=log_excerpt,
+    )
 
 
 default_args = {
@@ -23,6 +53,7 @@ default_args = {
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
     "email_on_failure": False,
+    "on_failure_callback": _callback_fallo,
 }
 
 
@@ -146,6 +177,46 @@ def _etl_contract_alerts():
         conn.close()
 
 
+def _notificar_resumen(**context):
+    """Tarea final: envía resumen global del DAG run a Telegram."""
+    from airflow.utils.state import State
+    from app.utils.telegram_notifier import notificar_tarea
+
+    ti = context["task_instance"]
+    dag_run = ti.get_dagrun()
+
+    TAREAS_ETL = [
+        "garantizar_tablas",
+        "etl_areas",
+        "etl_employees",
+        "etl_vacaciones",
+        "etl_incidencias",
+        "etl_contract_alerts",
+    ]
+
+    task_instances = {t.task_id: t for t in dag_run.get_task_instances()}
+
+    lineas = []
+    estado_global = "success"
+    for task_id in TAREAS_ETL:
+        t = task_instances.get(task_id)
+        estado = t.state if t else "no ejecutada"
+        lineas.append(f"  {task_id}: {estado}")
+        if estado in (State.FAILED, State.UPSTREAM_FAILED):
+            estado_global = "failed"
+
+    log_excerpt = "Resumen de tareas:\n" + "\n".join(lineas)
+
+    notificar_tarea(
+        state=estado_global,
+        dag_id=ti.dag_id,
+        task_id="[resumen_dag]",
+        run_id=context.get("run_id", "desconocido"),
+        ts=context.get("ts", ""),
+        log_excerpt=log_excerpt,
+    )
+
+
 # =============================================================================
 # DEFINICIÓN DEL DAG
 # =============================================================================
@@ -190,6 +261,13 @@ with DAG(
         python_callable=_etl_contract_alerts,
     )
 
+    t_resumen = PythonOperator(
+        task_id="notificar_resumen",
+        python_callable=_notificar_resumen,
+        trigger_rule=TriggerRule.ALL_DONE,  # Se ejecuta siempre, fallen o no las tareas anteriores
+        on_failure_callback=None,           # El resumen no necesita callback de fallo propio
+    )
+
     # Áreas primero (employees valida area_id contra rh.areas)
     # Employees antes de incidencias y alertas (ambas validan employee_id)
-    t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts]
+    t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts] >> t_resumen

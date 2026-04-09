@@ -160,6 +160,7 @@ def crear_e_insertar_tablas_incidencias(conexion, nombre_tabla: str, datos: list
         sql_insert = """
             INSERT INTO rh.consolidado_incidencias (
                 id,
+                rut_empleado,
                 employee_id,
                 days_count,
                 day_percent,
@@ -168,12 +169,13 @@ def crear_e_insertar_tablas_incidencias(conexion, nombre_tabla: str, datos: list
                 end_date,
                 status,
                 created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         sql_update = """
             UPDATE rh.consolidado_incidencias
             SET
                 employee_id = %s,
+                rut_empleado = %s,
                 days_count = %s,
                 day_percent = %s,
                 type_permission = %s,
