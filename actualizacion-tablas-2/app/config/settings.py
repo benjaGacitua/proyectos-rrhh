@@ -35,7 +35,7 @@ API_ENDPOINTS = {
 }
 
 # --- Configuración de Fechas ---
-FILTRAR_POR_FECHAS = False # Cambiar a False si quieres traer todo
+FILTRAR_POR_FECHAS = True # Cambiar a False si quieres traer todo
 
 fecha_hoy = datetime.now().date()
 fecha_inicio_objetivo = fecha_hoy - timedelta(days=7)
