@@ -10,7 +10,7 @@ que los datos de un período dado sean estables al momento de la ejecución.
 import json
 import time
 import requests
-from datetime import date
+from datetime import date, datetime
 
 from app.utils.logger import setup_logger
 
@@ -284,15 +284,15 @@ def ejecutar_carga_historica(conn, token, base_url, start_year=2019, start_month
     Pensado para ejecución única al inicializar la BD.
     Devuelve dict con totales: periodos_ok, periodos_error, periodos_vacios.
     """
-    from datetime import datetime
-    from dateutil.relativedelta import relativedelta
-
-    current = datetime(start_year, start_month, 1)
+    current_year, current_month = start_year, start_month
     today = datetime.now()
     periods = []
-    while current <= today:
-        periods.append((current.year, current.month))
-        current += relativedelta(months=1)
+    while (current_year, current_month) <= (today.year, today.month):
+        periods.append((current_year, current_month))
+        current_month += 1
+        if current_month > 12:
+            current_month = 1
+            current_year += 1
 
     total = len(periods)
     ok = errors = vacios = 0
