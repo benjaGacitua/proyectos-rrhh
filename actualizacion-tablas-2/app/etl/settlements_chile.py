@@ -273,8 +273,51 @@ def _insert_items(cursor, items):
 
 
 # =============================================================================
-# ORQUESTADOR PRINCIPAL
+# ORQUESTADORES
 # =============================================================================
+
+def ejecutar_carga_historica(conn, token, base_url, start_year=2019, start_month=1):
+    """
+    Carga histórica completa: itera todos los períodos desde start_year/start_month
+    hasta el mes actual inclusive y llama a ejecutar_flujo_settlements por cada uno.
+
+    Pensado para ejecución única al inicializar la BD.
+    Devuelve dict con totales: periodos_ok, periodos_error, periodos_vacios.
+    """
+    from datetime import datetime
+    from dateutil.relativedelta import relativedelta
+
+    current = datetime(start_year, start_month, 1)
+    today = datetime.now()
+    periods = []
+    while current <= today:
+        periods.append((current.year, current.month))
+        current += relativedelta(months=1)
+
+    total = len(periods)
+    ok = errors = vacios = 0
+
+    logger.info(f"Iniciando carga histórica: {total} períodos desde {start_month:02d}-{start_year}")
+
+    for i, (year, month) in enumerate(periods, start=1):
+        label = f"{month:02d}-{year}"
+        logger.info(f"[{i}/{total}] Procesando {label}...")
+        try:
+            exito = ejecutar_flujo_settlements(conn, token, base_url, year, month)
+            if exito:
+                ok += 1
+            else:
+                vacios += 1  # API sin datos para ese período (mes anterior a contrataciones, etc.)
+        except Exception as e:
+            logger.error(f"[{i}/{total}] Error inesperado en período {label}: {e}")
+            errors += 1
+        time.sleep(0.5)  # pausa breve entre períodos para no saturar la API
+
+    logger.info(
+        f"Carga histórica finalizada — OK: {ok}, Sin datos: {vacios}, Errores: {errors}"
+    )
+    return {"periodos_ok": ok, "periodos_vacios": vacios, "periodos_error": errors}
+
 
 def ejecutar_flujo_settlements(conn, token, base_url, year, month):
     """
