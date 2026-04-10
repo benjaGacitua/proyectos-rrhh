@@ -40,6 +40,20 @@ def tarea_ya_completada(nombre_tarea: str) -> bool:
     return False
 
 
+def tarea_ya_completada_este_mes(nombre_tarea: str) -> bool:
+    """Returns True if the task completed successfully at any point this calendar month."""
+    estado = _cargar_estado()
+    info = estado.get(nombre_tarea)
+    if info and info.get("status") == "OK":
+        try:
+            fecha_tarea = datetime.strptime(info["fecha"], "%Y-%m-%d")
+            hoy = datetime.now()
+            return fecha_tarea.year == hoy.year and fecha_tarea.month == hoy.month
+        except (ValueError, KeyError):
+            return False
+    return False
+
+
 def marcar_tarea(nombre_tarea: str, exito: bool = True, error_msg: str = None):
     """Updates the status of a task in estado_sincronizacion.json."""
     estado = _cargar_estado()

@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import datetime
 
 # Ajustar path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -7,15 +8,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import settings
 from app.utils.logger import setup_logger
 from app.utils.db_client import get_db_connection
-from app.etl import extract, load, create, contract_alerts
-from app.utils.estado import tarea_ya_completada, marcar_tarea
+from app.etl import extract, load, create, contract_alerts, settlements_chile
+from app.utils.estado import tarea_ya_completada, tarea_ya_completada_este_mes, marcar_tarea
 from app.utils.etl_core import ejecutar_flujo_etl
 
 logger = setup_logger(__name__)
 
 def main():
     logger.info("--- INICIANDO PROCESO ETL ---")
-    
+
     # 1. Conexión a Base de Datos (Con encriptación habilitada)
     conexion = get_db_connection()
     if not conexion:
@@ -27,6 +28,33 @@ def main():
         if not create.garantizar_tablas_rh(conexion):
             logger.error("No se pudo verificar/crear el esquema RH. Abortando.")
             return
+
+        # =========================================================================
+        # BLOQUE 0 (MENSUAL): LIQUIDACIONES CHILE
+        # Solo se ejecuta una vez por mes calendario. Si ya corrió este mes, se salta.
+        # =========================================================================
+        tarea_settlements = "etl_settlements_chile"
+
+        if tarea_ya_completada_este_mes(tarea_settlements):
+            logger.info(f"Saltando '{tarea_settlements}': Ya se completó este mes.")
+        elif not settings.URL_SETTLEMENTS_CHILE:
+            logger.warning(
+                f"Saltando '{tarea_settlements}': URL_SETTLEMENTS_CHILE no configurada en .env"
+            )
+        else:
+            hoy = datetime.now()
+            exito_settlements = settlements_chile.ejecutar_flujo_settlements(
+                conexion,
+                settings.TOKEN,
+                settings.URL_SETTLEMENTS_CHILE,
+                hoy.year,
+                hoy.month,
+            )
+            marcar_tarea(
+                tarea_settlements,
+                exito=exito_settlements,
+                error_msg=None if exito_settlements else "Fallo en flujo ETL settlements",
+            )
 
         # =========================================================================
         # BLOQUE 1: EMPLEADOS (Extract + Load)

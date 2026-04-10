@@ -7,6 +7,7 @@ load_dotenv()
 # --- Credenciales API ---
 TOKEN = os.getenv("TOKEN")
 API_BASE_URL = os.getenv("API_BASE_URL")
+URL_SETTLEMENTS_CHILE = os.getenv("URL_SETTLEMENTS_CHILE")
 
 # --- Credenciales Postgres vía túnel SSH ---
 SSH_HOST = os.getenv("SSH_HOST")

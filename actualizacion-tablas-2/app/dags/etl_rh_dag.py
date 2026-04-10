@@ -3,11 +3,13 @@ DAG: etl_rh_cramer
 Orquesta el ETL diario RH: BUK API → PostgreSQL (vía túnel SSH).
 
 Dependencias entre tareas:
-    garantizar_tablas → etl_areas → etl_employees
-                                        ├── etl_vacaciones
-                                        ├── etl_incidencias
-                                        └── etl_contract_alerts
-                                              └── notificar_resumen  (ALL_DONE)
+    garantizar_tablas ─┬─ check_inicio_mes → etl_settlements_chile ──────────────────┐
+                       └─ etl_areas → etl_employees ─┬─ etl_vacaciones               ├─→ notificar_resumen (ALL_DONE)
+                                                      ├─ etl_incidencias              │
+                                                      └─ etl_contract_alerts ─────────┘
+
+    check_inicio_mes: ShortCircuitOperator — solo días 1-5 del mes.
+    En días 6+, etl_settlements_chile queda en 'skipped' (no cuenta como error).
 
 Todas las importaciones del dominio (app.*) se realizan dentro de cada
 callable para evitar ejecuciones en tiempo de parseo del DAG.
@@ -21,7 +23,7 @@ Notificaciones Telegram:
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, ShortCircuitOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 
@@ -60,6 +62,39 @@ default_args = {
 # =============================================================================
 # CALLABLES — una función por tarea, cada una abre/cierra su propia conexión
 # =============================================================================
+
+def _es_inicio_de_mes(**context):
+    """
+    ShortCircuitOperator: devuelve True solo los primeros 5 días del mes.
+    Usar día <= 5 (en lugar de == 1) permite reintentos si el DAG falla el día 1.
+    Cuando devuelve False, las tareas downstream se marcan como 'skipped' sin error.
+    """
+    return context["logical_date"].day <= 5
+
+
+def _etl_settlements_chile():
+    from app.config import settings
+    from app.utils.db_client import get_db_connection
+    from app.etl.settlements_chile import ejecutar_flujo_settlements
+
+    if not settings.URL_SETTLEMENTS_CHILE:
+        raise ValueError("URL_SETTLEMENTS_CHILE no está configurada en .env")
+
+    conn = get_db_connection()
+    try:
+        hoy = datetime.now()
+        exito = ejecutar_flujo_settlements(
+            conn,
+            settings.TOKEN,
+            settings.URL_SETTLEMENTS_CHILE,
+            hoy.year,
+            hoy.month,
+        )
+        if not exito:
+            raise RuntimeError("ETL settlements terminó con errores — revisar logs.")
+    finally:
+        conn.close()
+
 
 def _garantizar_tablas():
     from app.utils.db_client import get_db_connection
@@ -187,6 +222,8 @@ def _notificar_resumen(**context):
 
     TAREAS_ETL = [
         "garantizar_tablas",
+        "check_inicio_mes",
+        "etl_settlements_chile",
         "etl_areas",
         "etl_employees",
         "etl_vacaciones",
@@ -236,6 +273,22 @@ with DAG(
         python_callable=_garantizar_tablas,
     )
 
+    # --- Bloque mensual (solo días 1-5 de cada mes) ---
+    t_check_mes = ShortCircuitOperator(
+        task_id="check_inicio_mes",
+        python_callable=_es_inicio_de_mes,
+        on_failure_callback=None,
+        # ignore_downstream_trigger_rules=False: las tareas bloqueadas quedan
+        # en 'skipped' y no impiden que t_areas arranque normalmente.
+        ignore_downstream_trigger_rules=False,
+    )
+
+    t_settlements = PythonOperator(
+        task_id="etl_settlements_chile",
+        python_callable=_etl_settlements_chile,
+    )
+
+    # --- Bloque diario ---
     t_areas = PythonOperator(
         task_id="etl_areas",
         python_callable=_etl_areas,
@@ -268,6 +321,8 @@ with DAG(
         on_failure_callback=None,           # El resumen no necesita callback de fallo propio
     )
 
-    # Áreas primero (employees valida area_id contra rh.areas)
-    # Employees antes de incidencias y alertas (ambas validan employee_id)
+    # Flujo mensual: corre en paralelo al bloque diario, ambos arrancan desde t_ddl
+    t_ddl >> t_check_mes >> t_settlements >> t_resumen
+
+    # Flujo diario (áreas primero porque employees valida area_id)
     t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts] >> t_resumen
