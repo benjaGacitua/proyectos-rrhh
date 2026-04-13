@@ -83,12 +83,19 @@ def _etl_settlements_chile():
     conn = get_db_connection()
     try:
         hoy = datetime.now()
+        # Cargar siempre el mes anterior (las liquidaciones del mes en curso
+        # no están cerradas hasta el cierre de nómina del mes siguiente)
+        if hoy.month == 1:
+            year, month = hoy.year - 1, 12
+        else:
+            year, month = hoy.year, hoy.month - 1
+
         exito = ejecutar_flujo_settlements(
             conn,
             settings.TOKEN,
             settings.URL_SETTLEMENTS_CHILE,
-            hoy.year,
-            hoy.month,
+            year,
+            month,
         )
         if not exito:
             raise RuntimeError("ETL settlements terminó con errores — revisar logs.")

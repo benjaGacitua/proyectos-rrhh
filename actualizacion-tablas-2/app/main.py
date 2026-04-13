@@ -43,12 +43,18 @@ def main():
             )
         else:
             hoy = datetime.now()
+            # Cargar siempre el mes anterior (las liquidaciones del mes en curso
+            # no están cerradas hasta el cierre de nómina del mes siguiente)
+            if hoy.month == 1:
+                year_s, month_s = hoy.year - 1, 12
+            else:
+                year_s, month_s = hoy.year, hoy.month - 1
             exito_settlements = settlements_chile.ejecutar_flujo_settlements(
                 conexion,
                 settings.TOKEN,
                 settings.URL_SETTLEMENTS_CHILE,
-                hoy.year,
-                hoy.month,
+                year_s,
+                month_s,
             )
             marcar_tarea(
                 tarea_settlements,
