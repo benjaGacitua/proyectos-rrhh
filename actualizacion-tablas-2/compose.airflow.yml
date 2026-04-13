@@ -42,6 +42,8 @@ x-airflow-common:
   volumes:
     # App source code (read-only) — parent dir is in PYTHONPATH so "app.*" imports work.
     - ./app:/opt/airflow/app_src/app:ro
+    # Scripts de administración/mantenimiento (carga histórica, migraciones, etc.).
+    - ./scripts:/opt/airflow/app_src/scripts:ro
     # load.py writes/deletes error JSONL files here — needs write access despite the :ro above.
     - ./app/utils/temp:/opt/airflow/app_src/app/utils/temp
     # Staging cache and task-state files (must be writable).
