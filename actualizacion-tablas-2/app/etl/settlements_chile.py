@@ -214,6 +214,7 @@ def _insert_settlements(cursor, rows):
     inserted = errors = 0
     for row in rows:
         try:
+            cursor.execute("SAVEPOINT sp_settlement")
             cursor.execute(sql, (
                 row["liquidacion_id"], row["employee_id"], row["rut"],
                 row["periodo"], row["anio"], row["mes"], row["pay_period"],
@@ -225,8 +226,10 @@ def _insert_settlements(cursor, rows):
                 row["liquido_a_pagar"], row["base_imponible"],
                 row["cerrada"], row["raw_payload"],
             ))
+            cursor.execute("RELEASE SAVEPOINT sp_settlement")
             inserted += 1
         except Exception as e:
+            cursor.execute("ROLLBACK TO SAVEPOINT sp_settlement")
             logger.error(f"   Error insertando liquidación {row.get('liquidacion_id')}: {e}")
             errors += 1
 
@@ -254,6 +257,7 @@ def _insert_items(cursor, items):
     inserted = errors = 0
     for item in items:
         try:
+            cursor.execute("SAVEPOINT sp_item")
             cursor.execute(sql, (
                 item["liquidacion_id"], item["employee_id"], item["rut"],
                 item["item_type"], item["income_type"], item["subtype"], item["name"],
@@ -261,8 +265,10 @@ def _insert_items(cursor, items):
                 item["credit_type"], item["institution"], item["description"],
                 item["code"], item["item_code"],
             ))
+            cursor.execute("RELEASE SAVEPOINT sp_item")
             inserted += 1
         except Exception as e:
+            cursor.execute("ROLLBACK TO SAVEPOINT sp_item")
             logger.error(
                 f"   Error insertando item de liquidación {item.get('liquidacion_id')}: {e}"
             )
