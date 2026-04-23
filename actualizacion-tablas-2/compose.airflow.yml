@@ -22,6 +22,8 @@ x-airflow-common:
   build:
     context: .
     dockerfile: Dockerfile.airflow
+  extra_hosts:
+    - "n8n.cramer.cl:192.9.200.12"
   env_file:
     - .env
   environment:

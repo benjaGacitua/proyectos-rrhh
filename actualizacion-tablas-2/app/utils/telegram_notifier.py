@@ -4,7 +4,8 @@ Envía notificaciones al webhook n8n que las reenvía a Telegram.
 Requiere la variable de entorno N8N_WEBHOOK_URL apuntando al endpoint
 configurado en el workflow 'Airflow ETL Logs a Telegram'.
 """
-
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import logging
 import os
 from datetime import datetime
@@ -66,7 +67,7 @@ def notificar_tarea(
     }
 
     try:
-        resp = requests.post(url, json=payload, timeout=_TIMEOUT)
+        resp = requests.post(url, json=payload, timeout=_TIMEOUT, verify=False)
         resp.raise_for_status()
         logger.debug(f"Notificación enviada a n8n — task={task_id} state={state}")
     except Exception as exc:
