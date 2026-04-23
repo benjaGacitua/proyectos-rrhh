@@ -3,13 +3,19 @@ DAG: etl_rh_cramer
 Orquesta el ETL diario RH: BUK API → PostgreSQL (vía túnel SSH).
 
 Dependencias entre tareas:
-    garantizar_tablas ─┬─ check_inicio_mes → etl_settlements_chile ──────────────────┐
-                       └─ etl_areas → etl_employees ─┬─ etl_vacaciones               ├─→ notificar_resumen (ALL_DONE)
-                                                      ├─ etl_incidencias              │
-                                                      └─ etl_contract_alerts ─────────┘
+    garantizar_tablas ─┬─ check_inicio_mes → etl_settlements_chile ────────────────────────────────┐
+                       └─ etl_areas → etl_employees ─┬─ etl_vacaciones                             ├─→ notificar_resumen (ALL_DONE)
+                                                      ├─ etl_contract_alerts                        │
+                                                      └─ etl_incidencias ─┬─ refresh_ausentismo ────┤
+                                                                           ├─ refresh_kpi_mensual ───┤
+                                                                           └─ refresh_kpi_semanal ───┘
 
     check_inicio_mes: ShortCircuitOperator — solo días 1-5 del mes.
     En días 6+, etl_settlements_chile queda en 'skipped' (no cuenta como error).
+
+    Bloque KPI (refresh_ausentismo, refresh_kpi_mensual, refresh_kpi_semanal):
+    Corre en paralelo después de etl_incidencias, ya que depende de datos frescos
+    de consolidado_incidencias y employees.
 
 Todas las importaciones del dominio (app.*) se realizan dentro de cada
 callable para evitar ejecuciones en tiempo de parseo del DAG.
@@ -24,6 +30,7 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator, ShortCircuitOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 
@@ -236,6 +243,9 @@ def _notificar_resumen(**context):
         "etl_vacaciones",
         "etl_incidencias",
         "etl_contract_alerts",
+        "refresh_ausentismo",
+        "refresh_kpi_mensual",
+        "refresh_kpi_semanal",
     ]
 
     task_instances = {t.task_id: t for t in dag_run.get_task_instances()}
@@ -272,7 +282,7 @@ with DAG(
     schedule="0 2 * * 1-5",   # Lunes a viernes a las 02:00
     start_date=datetime(2026, 4, 1),
     catchup=False,
-    tags=["rh", "etl"],
+    tags=["rh", "etl", "kpi"],
 ) as dag:
 
     t_ddl = PythonOperator(
@@ -321,6 +331,27 @@ with DAG(
         python_callable=_etl_contract_alerts,
     )
 
+    # --- Bloque KPI (depende de incidencias y employees frescos) ---
+    # Usa PostgresOperator porque son simples CALLs a procedures en PostgreSQL.
+    # Requiere la conexión 'postgres_rh' configurada en Airflow Admin → Connections.
+    t_refresh_ausentismo = PostgresOperator(
+        task_id="refresh_ausentismo",
+        postgres_conn_id="postgres_rh",
+        sql="CALL rh.refresh_reporte_ausentismo();",
+    )
+
+    t_refresh_kpi_mensual = PostgresOperator(
+        task_id="refresh_kpi_mensual",
+        postgres_conn_id="postgres_rh",
+        sql="CALL rh.refresh_kpi_inasistencias();",
+    )
+
+    t_refresh_kpi_semanal = PostgresOperator(
+        task_id="refresh_kpi_semanal",
+        postgres_conn_id="postgres_rh",
+        sql="CALL rh.refresh_kpi_inasistencias_semanal();",
+    )
+
     t_resumen = PythonOperator(
         task_id="notificar_resumen",
         python_callable=_notificar_resumen,
@@ -332,4 +363,11 @@ with DAG(
     t_ddl >> t_check_mes >> t_settlements >> t_resumen
 
     # Flujo diario (áreas primero porque employees valida area_id)
-    t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts] >> t_resumen
+    t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts]
+
+    # Bloque KPI: arranca cuando incidencias Y employees están listos
+    # (t_employees ya terminó porque t_incidencias depende de él)
+    t_incidencias >> [t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal]
+
+    # Todo converge en el resumen
+    [t_vacaciones, t_alerts, t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal] >> t_resumen
