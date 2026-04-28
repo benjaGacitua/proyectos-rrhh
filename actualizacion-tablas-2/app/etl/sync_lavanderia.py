@@ -2,18 +2,28 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# Empleados activos con área completa. Se excluyen filas sin rut, nombre, cargo
-# o sin los tres niveles de área (second_level_id → subarea, first_level_id → empresa).
-_QUERY_SOURCE = """
+_QUERY_AREAS_RH = """
+    SELECT DISTINCT
+        id               AS rh_area_id,
+        name             AS nombre_area,
+        second_level_id  AS rh_subarea_id,
+        second_level_name AS nombre_subarea,
+        first_level_id   AS rh_empresa_id,
+        first_level_name AS nombre_empresa
+    FROM rh.areas
+    WHERE name IS NOT NULL
+"""
+
+_QUERY_EMPLOYEES = """
     SELECT
         e.rut,
-        e.full_name                 AS nombre_completo,
-        e.name_role                 AS cargo,
-        e.area_id,
-        a.second_level_id           AS subarea_id,
-        a.first_level_id            AS empresa_id,
-        (e.status = 'activo')       AS activo,
-        e.picture_url               AS url_picture
+        e.full_name             AS nombre_completo,
+        e.name_role             AS cargo,
+        e.area_id               AS rh_area_id,
+        a.second_level_id       AS rh_subarea_id,
+        a.first_level_id        AS rh_empresa_id,
+        (e.status = 'activo')   AS activo,
+        e.picture_url           AS url_picture
     FROM rh.employees e
     JOIN rh.areas a ON e.area_id = a.id
     WHERE e.rut IS NOT NULL
@@ -24,8 +34,7 @@ _QUERY_SOURCE = """
       AND a.first_level_id IS NOT NULL
 """
 
-# No se tocan talla_id ni huella_digital — son gestionados por la app de lavandería.
-_SQL_UPSERT = """
+_SQL_UPSERT_PERSONAL = """
     INSERT INTO public.personal (
         rut, nombre_completo, cargo, area_id, subarea_id, empresa_id, activo, url_picture
     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -40,21 +49,97 @@ _SQL_UPSERT = """
 """
 
 
+def _sync_tablas_referencia(cur_rh, cur_lav, conn_lav):
+    """
+    Sincroniza areas, subareas y empresa en lavandería desde rh.areas usando
+    los nombres como clave (UNIQUE constraint). Retorna tres dicts de mapeo:
+        rh_area_id      → lav area_id
+        rh_subarea_id   → lav subarea_id
+        rh_empresa_id   → lav empresa_id
+    """
+    cur_rh.execute(_QUERY_AREAS_RH)
+    filas = cur_rh.fetchall()
+
+    rh_to_lav_area = {}
+    rh_to_lav_subarea = {}
+    rh_to_lav_empresa = {}
+
+    for rh_area_id, nombre_area, rh_subarea_id, nombre_subarea, rh_empresa_id, nombre_empresa in filas:
+        if nombre_area and rh_area_id is not None:
+            cur_lav.execute(
+                """
+                INSERT INTO public.areas (nombre_area) VALUES (%s)
+                ON CONFLICT (nombre_area) DO UPDATE SET nombre_area = EXCLUDED.nombre_area
+                RETURNING area_id
+                """,
+                (nombre_area,),
+            )
+            rh_to_lav_area[rh_area_id] = cur_lav.fetchone()[0]
+
+        if nombre_subarea and rh_subarea_id is not None:
+            cur_lav.execute(
+                """
+                INSERT INTO public.subareas (nombre_subarea) VALUES (%s)
+                ON CONFLICT (nombre_subarea) DO UPDATE SET nombre_subarea = EXCLUDED.nombre_subarea
+                RETURNING subarea_id
+                """,
+                (nombre_subarea,),
+            )
+            rh_to_lav_subarea[rh_subarea_id] = cur_lav.fetchone()[0]
+
+        if nombre_empresa and rh_empresa_id is not None:
+            cur_lav.execute(
+                """
+                INSERT INTO public.empresa (nombre_empresa) VALUES (%s)
+                ON CONFLICT (nombre_empresa) DO UPDATE SET nombre_empresa = EXCLUDED.nombre_empresa
+                RETURNING empresa_id
+                """,
+                (nombre_empresa,),
+            )
+            rh_to_lav_empresa[rh_empresa_id] = cur_lav.fetchone()[0]
+
+    conn_lav.commit()
+    logger.info(
+        f"Tablas referencia sincronizadas — "
+        f"areas: {len(rh_to_lav_area)}, subareas: {len(rh_to_lav_subarea)}, "
+        f"empresas: {len(rh_to_lav_empresa)}"
+    )
+    return rh_to_lav_area, rh_to_lav_subarea, rh_to_lav_empresa
+
+
 def sincronizar_personal_lavanderia(conn_rh, conn_lav) -> dict:
     cur_rh = conn_rh.cursor()
     cur_lav = conn_lav.cursor()
     procesados = errores = omitidos = 0
 
     try:
-        cur_rh.execute(_QUERY_SOURCE)
-        rows = cur_rh.fetchall()
-        logger.info(f"Empleados a sincronizar con lavandería: {len(rows)}")
+        rh_to_lav_area, rh_to_lav_subarea, rh_to_lav_empresa = _sync_tablas_referencia(
+            cur_rh, cur_lav, conn_lav
+        )
 
-        for row in rows:
-            rut = row[0]
+        cur_rh.execute(_QUERY_EMPLOYEES)
+        rows = cur_rh.fetchall()
+        logger.info(f"Empleados candidatos a sincronizar: {len(rows)}")
+
+        for rut, nombre_completo, cargo, rh_area_id, rh_subarea_id, rh_empresa_id, activo, url_picture in rows:
+            lav_area_id    = rh_to_lav_area.get(rh_area_id)
+            lav_subarea_id = rh_to_lav_subarea.get(rh_subarea_id)
+            lav_empresa_id = rh_to_lav_empresa.get(rh_empresa_id)
+
+            if not lav_area_id or not lav_subarea_id or not lav_empresa_id:
+                logger.warning(
+                    f"Omitiendo rut={rut}: sin mapeo para "
+                    f"area={rh_area_id}, subarea={rh_subarea_id}, empresa={rh_empresa_id}"
+                )
+                omitidos += 1
+                continue
+
             try:
                 cur_lav.execute("SAVEPOINT sp_personal")
-                cur_lav.execute(_SQL_UPSERT, row)
+                cur_lav.execute(
+                    _SQL_UPSERT_PERSONAL,
+                    (rut, nombre_completo, cargo, lav_area_id, lav_subarea_id, lav_empresa_id, activo, url_picture),
+                )
                 cur_lav.execute("RELEASE SAVEPOINT sp_personal")
                 procesados += 1
 
@@ -65,15 +150,15 @@ def sincronizar_personal_lavanderia(conn_rh, conn_lav) -> dict:
             except Exception as e:
                 cur_lav.execute("ROLLBACK TO SAVEPOINT sp_personal")
                 cur_lav.execute("RELEASE SAVEPOINT sp_personal")
-                # FK violation más probable: area_id/subarea_id/empresa_id no existe en lavandería
                 logger.warning(f"Error sincronizando rut={rut}: {e}")
                 errores += 1
 
         conn_lav.commit()
         logger.info(
-            f"Sync lavandería finalizado — Procesados: {procesados}, Errores: {errores}"
+            f"Sync lavandería finalizado — Procesados: {procesados}, "
+            f"Omitidos: {omitidos}, Errores: {errores}"
         )
-        return {"procesados": procesados, "errores": errores}
+        return {"procesados": procesados, "omitidos": omitidos, "errores": errores}
 
     except Exception as e:
         conn_lav.rollback()
