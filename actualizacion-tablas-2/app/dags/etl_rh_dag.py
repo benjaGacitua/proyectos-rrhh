@@ -31,7 +31,6 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator, ShortCircuitOperator
-from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 
@@ -244,6 +243,42 @@ def _etl_contract_alerts():
         conn.close()
 
 
+def _refresh_ausentismo():
+    from app.utils.db_client import get_db_connection
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CALL rh.refresh_reporte_ausentismo();")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _refresh_kpi_mensual():
+    from app.utils.db_client import get_db_connection
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CALL rh.refresh_kpi_inasistencias();")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _refresh_kpi_semanal():
+    from app.utils.db_client import get_db_connection
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CALL rh.refresh_kpi_inasistencias_semanal();")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _notificar_resumen(**context):
     """Tarea final: envía resumen global del DAG run a Telegram."""
     from airflow.utils.state import State
@@ -356,24 +391,19 @@ with DAG(
     )
 
     # --- Bloque KPI (depende de incidencias y employees frescos) ---
-    # Usa PostgresOperator porque son simples CALLs a procedures en PostgreSQL.
-    # Requiere la conexión 'postgres_rh' configurada en Airflow Admin → Connections.
-    t_refresh_ausentismo = PostgresOperator(
+    t_refresh_ausentismo = PythonOperator(
         task_id="refresh_ausentismo",
-        postgres_conn_id="postgres_rh",
-        sql="CALL rh.refresh_reporte_ausentismo();",
+        python_callable=_refresh_ausentismo,
     )
 
-    t_refresh_kpi_mensual = PostgresOperator(
+    t_refresh_kpi_mensual = PythonOperator(
         task_id="refresh_kpi_mensual",
-        postgres_conn_id="postgres_rh",
-        sql="CALL rh.refresh_kpi_inasistencias();",
+        python_callable=_refresh_kpi_mensual,
     )
 
-    t_refresh_kpi_semanal = PostgresOperator(
+    t_refresh_kpi_semanal = PythonOperator(
         task_id="refresh_kpi_semanal",
-        postgres_conn_id="postgres_rh",
-        sql="CALL rh.refresh_kpi_inasistencias_semanal();",
+        python_callable=_refresh_kpi_semanal,
     )
 
     t_resumen = PythonOperator(
