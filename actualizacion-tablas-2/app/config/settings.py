@@ -20,12 +20,19 @@ SSH_PRIVATE_KEY_PASSWORD = os.getenv("SSH_PRIVATE_KEY_PASSWORD")
 # --- Notificaciones n8n / Telegram ---
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")  # URL del webhook n8n 'airflow-etl-log'
 
-# --- Credenciales Postgres ---
+# --- Credenciales Postgres rh_cramer ---
 PG_HOST = os.getenv("PG_HOST", "127.0.0.1")
 PG_PORT = int(os.getenv("PG_PORT", "5432"))
 PG_DATABASE = os.getenv("PG_DATABASE")
 PG_USER = os.getenv("PG_USER")
 PG_PASSWORD = os.getenv("PG_PASSWORD")
+
+# --- Credenciales Postgres db_lavanderia ---
+LAV_PG_HOST = os.getenv("LAV_PG_HOST", "127.0.0.1")
+LAV_PG_PORT = int(os.getenv("LAV_PG_PORT", "5433"))
+LAV_PG_DATABASE = os.getenv("LAV_PG_DATABASE")
+LAV_PG_USER = os.getenv("LAV_PG_USER", "lavanderia_reader")
+LAV_PG_PASSWORD = os.getenv("LAV_PG_PASSWORD")
 
 
 # --- Configuración API ---

@@ -7,6 +7,7 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 _ACTIVE_TUNNEL = None
+_ACTIVE_LAV_TUNNEL = None
 
 def _build_ssh_tunnel():
     ssh_kwargs = {}
@@ -37,7 +38,57 @@ def _close_tunnel():
     _ACTIVE_TUNNEL = None
 
 
+def _close_lav_tunnel():
+    global _ACTIVE_LAV_TUNNEL
+    if _ACTIVE_LAV_TUNNEL and _ACTIVE_LAV_TUNNEL.is_active:
+        _ACTIVE_LAV_TUNNEL.stop()
+    _ACTIVE_LAV_TUNNEL = None
+
+
 atexit.register(_close_tunnel)
+atexit.register(_close_lav_tunnel)
+
+def get_lavanderia_connection():
+    global _ACTIVE_LAV_TUNNEL
+    try:
+        logger.info("Abriendo túnel SSH hacia Postgres lavandería...")
+        ssh_kwargs = {}
+        if settings.SSH_PRIVATE_KEY:
+            ssh_kwargs["ssh_pkey"] = settings.SSH_PRIVATE_KEY
+            if settings.SSH_PRIVATE_KEY_PASSWORD:
+                ssh_kwargs["ssh_private_key_password"] = settings.SSH_PRIVATE_KEY_PASSWORD
+        elif settings.SSH_PASSWORD:
+            ssh_kwargs["ssh_password"] = settings.SSH_PASSWORD
+        else:
+            raise ValueError(
+                "Debes configurar SSH_PASSWORD o SSH_PRIVATE_KEY para abrir el túnel SSH."
+            )
+
+        _ACTIVE_LAV_TUNNEL = SSHTunnelForwarder(
+            (settings.SSH_HOST, settings.SSH_PORT),
+            ssh_username=settings.SSH_USER,
+            remote_bind_address=(settings.LAV_PG_HOST, settings.LAV_PG_PORT),
+            local_bind_address=("127.0.0.1", 0),
+            **ssh_kwargs,
+        )
+        _ACTIVE_LAV_TUNNEL.start()
+
+        logger.info("Conectando a Postgres lavandería por túnel SSH...")
+        conexion = psycopg2.connect(
+            host="127.0.0.1",
+            port=_ACTIVE_LAV_TUNNEL.local_bind_port,
+            dbname=settings.LAV_PG_DATABASE,
+            user=settings.LAV_PG_USER,
+            password=settings.LAV_PG_PASSWORD,
+            connect_timeout=10,
+        )
+        conexion.autocommit = False
+        return conexion
+    except Exception as e:
+        _close_lav_tunnel()
+        logger.error(f"Error crítico al conectar a Postgres lavandería: {e}")
+        sys.exit(1)
+
 
 def get_db_connection():
     global _ACTIVE_TUNNEL

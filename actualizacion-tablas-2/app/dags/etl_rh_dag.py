@@ -6,6 +6,7 @@ Dependencias entre tareas:
     garantizar_tablas ─┬─ check_inicio_mes → etl_settlements_chile ────────────────────────────────┐
                        └─ etl_areas → etl_employees ─┬─ etl_vacaciones                             ├─→ notificar_resumen (ALL_DONE)
                                                       ├─ etl_contract_alerts                        │
+                                                      ├─ etl_sync_lavanderia ───────────────────────┤
                                                       └─ etl_incidencias ─┬─ refresh_ausentismo ────┤
                                                                            ├─ refresh_kpi_mensual ───┤
                                                                            └─ refresh_kpi_semanal ───┘
@@ -211,6 +212,23 @@ def _etl_incidencias():
         conn.close()
 
 
+def _etl_sync_lavanderia():
+    from app.utils.db_client import get_db_connection, get_lavanderia_connection
+    from app.etl.sync_lavanderia import sincronizar_personal_lavanderia
+
+    conn_rh = get_db_connection()
+    conn_lav = get_lavanderia_connection()
+    try:
+        resultado = sincronizar_personal_lavanderia(conn_rh, conn_lav)
+        if resultado["errores"] > 0:
+            raise RuntimeError(
+                f"Sync lavandería terminó con {resultado['errores']} errores — revisar logs."
+            )
+    finally:
+        conn_rh.close()
+        conn_lav.close()
+
+
 def _etl_contract_alerts():
     from app.utils.db_client import get_db_connection
     from app.etl import contract_alerts
@@ -243,6 +261,7 @@ def _notificar_resumen(**context):
         "etl_vacaciones",
         "etl_incidencias",
         "etl_contract_alerts",
+        "etl_sync_lavanderia",
         "refresh_ausentismo",
         "refresh_kpi_mensual",
         "refresh_kpi_semanal",
@@ -331,6 +350,11 @@ with DAG(
         python_callable=_etl_contract_alerts,
     )
 
+    t_sync_lavanderia = PythonOperator(
+        task_id="etl_sync_lavanderia",
+        python_callable=_etl_sync_lavanderia,
+    )
+
     # --- Bloque KPI (depende de incidencias y employees frescos) ---
     # Usa PostgresOperator porque son simples CALLs a procedures en PostgreSQL.
     # Requiere la conexión 'postgres_rh' configurada en Airflow Admin → Connections.
@@ -363,11 +387,11 @@ with DAG(
     t_ddl >> t_check_mes >> t_settlements >> t_resumen
 
     # Flujo diario (áreas primero porque employees valida area_id)
-    t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts]
+    t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts, t_sync_lavanderia]
 
     # Bloque KPI: arranca cuando incidencias Y employees están listos
     # (t_employees ya terminó porque t_incidencias depende de él)
     t_incidencias >> [t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal]
 
     # Todo converge en el resumen
-    [t_vacaciones, t_alerts, t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal] >> t_resumen
+    [t_vacaciones, t_alerts, t_sync_lavanderia, t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal] >> t_resumen
