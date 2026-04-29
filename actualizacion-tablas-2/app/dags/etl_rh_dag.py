@@ -76,7 +76,7 @@ def _es_inicio_de_mes(**context):
     Usar día <= 5 (en lugar de == 1) permite reintentos si el DAG falla el día 1.
     Cuando devuelve False, las tareas downstream se marcan como 'skipped' sin error.
     """
-    return context["logical_date"].day <= 16
+    return context["logical_date"].day in (1, 5, 20)
 
 
 def _etl_settlements_chile():
