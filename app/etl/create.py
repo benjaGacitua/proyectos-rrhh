@@ -318,6 +318,57 @@ def garantizar_tablas_rh(conexion) -> bool:
             """
         )
 
+        # --- Procedimiento: rh.refresh_reporte_ausentismo ---
+        cursor.execute(
+            """
+            CREATE OR REPLACE PROCEDURE rh.refresh_reporte_ausentismo()
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                INSERT INTO rh.reporte_ausentismo_empleados (
+                    rut,
+                    full_name,
+                    active_since,
+                    dias_corridos_contratado,
+                    dias_habiles_transcurridos,
+                    dias_totales_ausentismo,
+                    dias_totales_habiles_ausentismo,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    e.rut,
+                    e.full_name,
+                    e.active_since,
+                    GREATEST(0, CURRENT_DATE - COALESCE(e.active_since, CURRENT_DATE)) AS dias_corridos_contratado,
+                    GREATEST(0, (CURRENT_DATE - COALESCE(e.active_since, CURRENT_DATE)) * 5 / 7) AS dias_habiles_transcurridos,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN ci.end_date IS NOT NULL AND ci.start_date IS NOT NULL
+                            THEN (ci.end_date - ci.start_date + 1)
+                            ELSE COALESCE(ci.days_count, 0)
+                        END
+                    ), 0) AS dias_totales_ausentismo,
+                    COALESCE(SUM(ci.days_count), 0) AS dias_totales_habiles_ausentismo,
+                    NOW(),
+                    NOW()
+                FROM rh.employees e
+                LEFT JOIN rh.consolidado_incidencias ci ON ci.employee_id = e.id
+                WHERE e.rut IS NOT NULL
+                GROUP BY e.rut, e.full_name, e.active_since
+                ON CONFLICT (rut) DO UPDATE SET
+                    full_name                      = EXCLUDED.full_name,
+                    active_since                   = EXCLUDED.active_since,
+                    dias_corridos_contratado       = EXCLUDED.dias_corridos_contratado,
+                    dias_habiles_transcurridos     = EXCLUDED.dias_habiles_transcurridos,
+                    dias_totales_ausentismo        = EXCLUDED.dias_totales_ausentismo,
+                    dias_totales_habiles_ausentismo = EXCLUDED.dias_totales_habiles_ausentismo,
+                    updated_at                     = NOW();
+            END;
+            $$;
+            """
+        )
+
         conexion.commit()
         logger.info("DDL de tablas RH verificado/creado correctamente.")
         return True
