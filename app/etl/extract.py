@@ -1,7 +1,7 @@
 import requests
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.utils.logger import setup_logger
 from app.config import settings
 from requests.adapters import HTTPAdapter
@@ -352,11 +352,18 @@ def obtener_datos_vacaciones(url_vacaciones: str = settings.API_BASE_URL):
     http.mount("http://", adapter)
 
     headers = {"auth_token": settings.TOKEN}
-    url_actual = url_vacaciones + "vacations"
+
+    fecha_fin = datetime.now().date()
+    fecha_inicio = fecha_fin - timedelta(days=91)  # ~3 meses
+
+    url_base = url_vacaciones + "vacations"
+    url_actual = f"{url_base}?end_after={fecha_inicio}&page_size=100"
+
     vacaciones_obtenidas = []
     pagina_actual = 1
-    
-    print(f"Comenzando obtención de vacaciones: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    print(f"Comenzando obtención de vacaciones (últimos ~3 meses): {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Filtrando vacaciones con end_date posterior a: {fecha_inicio}")
     
     try:
         while url_actual:

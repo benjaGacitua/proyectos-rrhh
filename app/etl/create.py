@@ -325,6 +325,8 @@ def garantizar_tablas_rh(conexion) -> bool:
             LANGUAGE plpgsql
             AS $$
             BEGIN
+                DELETE FROM rh.reporte_ausentismo_empleados;
+
                 INSERT INTO rh.reporte_ausentismo_empleados (
                     rut,
                     full_name,
@@ -355,15 +357,7 @@ def garantizar_tablas_rh(conexion) -> bool:
                 FROM rh.employees e
                 LEFT JOIN rh.consolidado_incidencias ci ON ci.employee_id = e.id
                 WHERE e.rut IS NOT NULL
-                GROUP BY e.rut, e.full_name, e.active_since
-                ON CONFLICT (rut) DO UPDATE SET
-                    full_name                      = EXCLUDED.full_name,
-                    active_since                   = EXCLUDED.active_since,
-                    dias_corridos_contratado       = EXCLUDED.dias_corridos_contratado,
-                    dias_habiles_transcurridos     = EXCLUDED.dias_habiles_transcurridos,
-                    dias_totales_ausentismo        = EXCLUDED.dias_totales_ausentismo,
-                    dias_totales_habiles_ausentismo = EXCLUDED.dias_totales_habiles_ausentismo,
-                    updated_at                     = NOW();
+                GROUP BY e.rut, e.full_name, e.active_since;
             END;
             $$;
             """
