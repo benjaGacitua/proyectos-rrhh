@@ -336,6 +336,76 @@ def obtener_datos_tabla_areas(url_areas: str = settings.API_BASE_URL):
     return areas_filtradas
 #! \\\ ======================================================================================= \\\
 
+#! /// Extracción Historial Laboral (jobs) ///
+def obtener_historial_laboral_completo(url_employees: str = settings.API_BASE_URL):
+    """
+    Obtiene el historial laboral (current_job + jobs) de cada persona desde la API.
+    Devuelve registros únicos por job_id, con el person_id de la API (nivel persona),
+    que load.cargar_datos_job_history traduce al employees.id vigente.
+    """
+    headers = {"auth_token": settings.TOKEN}
+    historial_laboral = []
+    url_actual = url_employees + "employees"
+    pagina_actual = 1
+
+    logger.info("Comenzando la obtención del historial laboral completo...")
+
+    while url_actual:
+        logger.info(f"Obteniendo página {pagina_actual}...")
+        try:
+            respuesta = requests.get(url_actual, headers=headers, timeout=30)
+            respuesta.raise_for_status()
+
+            respuesta_api = respuesta.json()
+            data_pagina = respuesta_api.get('data', [])
+            pagination_info = respuesta_api.get('pagination', {})
+
+            for persona in data_pagina:
+                person_id = to_int_or_none(persona.get("person_id"))
+                person_rut = to_str_or_none(persona.get("rut"), 20)
+
+                all_jobs = []
+                if persona.get("current_job"):
+                    all_jobs.append(persona.get("current_job"))
+                if persona.get("jobs"):
+                    all_jobs.extend(persona.get("jobs"))
+
+                for job in all_jobs:
+                    if not job:
+                        continue
+                    boss = job.get("boss") or {}
+                    role = job.get("role") or {}
+                    historial_laboral.append({
+                        "job_id": to_int_or_none(job.get("id")),
+                        "person_id": person_id,
+                        "rut": person_rut,
+                        "start_date": _to_date_str(job.get("start_date")),
+                        "end_date": _to_date_str(job.get("end_date")),
+                        "base_wage": job.get("base_wage"),
+                        "name_role": to_str_or_none(role.get("name"), 255),
+                        "boss_person_id": to_int_or_none(boss.get("id")),
+                        "boss_rut": to_str_or_none(boss.get("rut"), 20),
+                    })
+
+            logger.info(f"Página {pagina_actual}: {len(data_pagina)} personas procesadas.")
+
+            url_actual = pagination_info.get('next')
+            pagina_actual += 1
+            time.sleep(0.5)
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error en la petición: {e}")
+            break
+
+    registros_unicos = {
+        rec["job_id"]: rec for rec in historial_laboral if rec.get("job_id") is not None
+    }.values()
+    logger.info(
+        f"Paginación completada. Registros brutos: {len(historial_laboral)}, únicos: {len(registros_unicos)}"
+    )
+    return list(registros_unicos)
+#! \\\ ======================================================================================= \\\
+
 #! /// Extracción Vacaciones ///
 def obtener_datos_vacaciones(url_vacaciones: str = settings.API_BASE_URL):
 

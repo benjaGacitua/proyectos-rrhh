@@ -581,9 +581,9 @@ def cargar_datos_vacaciones(conexion, vacaciones_datos, batch_size=50):
     def limpiar_fecha(fecha_str, es_solo_fecha=False):
         if not fecha_str or str(fecha_str).strip() == '':
             return None
-        
+
         s = str(fecha_str).strip()
-        
+
         if s == '' or s == '0000-00-00':
             return None
 
@@ -591,7 +591,7 @@ def cargar_datos_vacaciones(conexion, vacaciones_datos, batch_size=50):
 
         if es_solo_fecha and len(s) >= 10:
             return s[:10]
-        
+
         if not es_solo_fecha and '.' in s:
             s = s.split('.')[0]
 
@@ -653,5 +653,101 @@ def cargar_datos_vacaciones(conexion, vacaciones_datos, batch_size=50):
     except Exception as e:
         print(f"Error al hacer commit final: {e}")
         conexion.rollback()
+    finally:
+        cursor.close()
+
+#! /// Load de tabla job_history --> Relacionada con función extract.obtener_historial_laboral_completo ///
+def cargar_datos_job_history(conexion, jobs_datos, batch_size=100):
+    """
+    Upsert del historial laboral en rh.job_history.
+
+    person_id de la API (nivel persona) se traduce al employees.id vigente vía
+    lookup por employees.person_id, satisfaciendo la FK NOT NULL a employees(id).
+    Filas sin empleado vigente se omiten. boss_id se resuelve igual (nullable).
+    """
+    if not jobs_datos:
+        print("No hay datos de historial laboral para cargar.")
+        return
+
+    cursor = conexion.cursor()
+    print(f"Iniciando carga de {len(jobs_datos)} registros de historial laboral en BD...")
+
+    stats = {"insert": 0, "error": 0, "omitidos_sin_empleado": 0}
+
+    # Mapa person_id (API) -> employees.id vigente
+    cursor.execute("SELECT id, person_id FROM rh.employees WHERE person_id IS NOT NULL")
+    person_a_employee = {row[1]: row[0] for row in cursor.fetchall()}
+
+    sql_upsert = """
+        INSERT INTO rh.job_history (
+            job_id, person_id, rut, start_date, end_date, base_wage,
+            name_role, boss_id, boss_rut, created_at, updated_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+        ON CONFLICT (job_id) DO UPDATE SET
+            person_id = EXCLUDED.person_id,
+            rut = EXCLUDED.rut,
+            start_date = EXCLUDED.start_date,
+            end_date = EXCLUDED.end_date,
+            base_wage = EXCLUDED.base_wage,
+            name_role = EXCLUDED.name_role,
+            boss_id = EXCLUDED.boss_id,
+            boss_rut = EXCLUDED.boss_rut,
+            updated_at = NOW()
+    """
+
+    try:
+        for index, job in enumerate(jobs_datos):
+            try:
+                cursor.execute("SAVEPOINT sp_job")
+                employee_id = person_a_employee.get(job.get("person_id"))
+                if employee_id is None:
+                    stats["omitidos_sin_empleado"] += 1
+                    cursor.execute("RELEASE SAVEPOINT sp_job")
+                    continue
+
+                boss_id = person_a_employee.get(job.get("boss_person_id"))
+
+                cursor.execute(
+                    sql_upsert,
+                    (
+                        job.get("job_id"),
+                        employee_id,
+                        job.get("rut"),
+                        job.get("start_date"),
+                        job.get("end_date"),
+                        job.get("base_wage"),
+                        job.get("name_role"),
+                        boss_id,
+                        job.get("boss_rut"),
+                    ),
+                )
+                stats["insert"] += 1
+                cursor.execute("RELEASE SAVEPOINT sp_job")
+
+                if (index + 1) % batch_size == 0:
+                    conexion.commit()
+                    print(f"   ... Lote procesado: {index + 1} registros.")
+
+            except Exception as e_row:
+                cursor.execute("ROLLBACK TO SAVEPOINT sp_job")
+                cursor.execute("RELEASE SAVEPOINT sp_job")
+                _registrar_error_fila(
+                    entidad="job_history",
+                    clave=str(job.get("job_id", "sin_id")),
+                    payload=job,
+                    error=e_row,
+                )
+                logger.exception(f"Error procesando job_id={job.get('job_id')}: {e_row}")
+                stats["error"] += 1
+
+        conexion.commit()
+        logger.info(
+            f"Carga de job_history finalizada. Inserts/Updates: {stats['insert']}, "
+            f"Errores: {stats['error']}, Omitidos sin empleado vigente: {stats['omitidos_sin_empleado']}."
+        )
+    except Exception as e:
+        conexion.rollback()
+        logger.exception(f"Error general cargando job_history: {e}")
+        raise
     finally:
         cursor.close()

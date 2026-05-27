@@ -7,6 +7,7 @@ Dependencias entre tareas:
                        └─ etl_areas → etl_employees ─┬─ etl_vacaciones                             ├─→ notificar_resumen (ALL_DONE)
                                                       ├─ etl_contract_alerts                        │
                                                       ├─ etl_sync_lavanderia ───────────────────────┤
+                                                      ├─ etl_job_history ───────────────────────────┤
                                                       └─ etl_incidencias ─┬─ refresh_ausentismo ────┤
                                                                            ├─ refresh_kpi_mensual ───┤
                                                                            └─ refresh_kpi_semanal ───┘
@@ -187,6 +188,28 @@ def _etl_vacaciones():
         conn.close()
 
 
+def _etl_job_history():
+    from app.config import settings
+    from app.utils.db_client import get_db_connection
+    from app.etl import extract, load
+    from app.utils.etl_core import ejecutar_flujo_etl
+
+    conn = get_db_connection()
+    try:
+        exito = ejecutar_flujo_etl(
+            nombre_entidad="job_history",
+            funcion_extraccion=lambda: extract.obtener_historial_laboral_completo(
+                settings.API_BASE_URL
+            ),
+            funcion_carga=load.cargar_datos_job_history,
+            conexion_db=conn,
+        )
+        if not exito:
+            raise RuntimeError("ETL job_history terminó con errores — revisar staging.")
+    finally:
+        conn.close()
+
+
 def _etl_incidencias():
     from app.config import settings
     from app.utils.db_client import get_db_connection
@@ -297,6 +320,7 @@ def _notificar_resumen(**context):
         "etl_incidencias",
         "etl_contract_alerts",
         "etl_sync_lavanderia",
+        "etl_job_history",
         "refresh_ausentismo",
         "refresh_kpi_mensual",
         "refresh_kpi_semanal",
@@ -390,6 +414,11 @@ with DAG(
         python_callable=_etl_sync_lavanderia,
     )
 
+    t_job_history = PythonOperator(
+        task_id="etl_job_history",
+        python_callable=_etl_job_history,
+    )
+
     # --- Bloque KPI (depende de incidencias y employees frescos) ---
     t_refresh_ausentismo = PythonOperator(
         task_id="refresh_ausentismo",
@@ -417,11 +446,11 @@ with DAG(
     t_ddl >> t_check_mes >> t_settlements >> t_resumen
 
     # Flujo diario (áreas primero porque employees valida area_id)
-    t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts, t_sync_lavanderia]
+    t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts, t_sync_lavanderia, t_job_history]
 
     # Bloque KPI: arranca cuando incidencias Y employees están listos
     # (t_employees ya terminó porque t_incidencias depende de él)
     t_incidencias >> [t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal]
 
     # Todo converge en el resumen
-    [t_vacaciones, t_alerts, t_sync_lavanderia, t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal] >> t_resumen
+    [t_vacaciones, t_alerts, t_sync_lavanderia, t_job_history, t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal] >> t_resumen
