@@ -177,7 +177,10 @@ def crear_e_insertar_tablas_incidencias(conexion, nombre_tabla: str, datos: list
                 days_count = %s,
                 day_percent = %s,
                 type_permission = %s,
-                status = %s
+                start_date = %s,
+                end_date = %s,
+                status = %s,
+                created_at = %s
             WHERE id = %s
         """
         sql_check = """
@@ -186,12 +189,20 @@ def crear_e_insertar_tablas_incidencias(conexion, nombre_tabla: str, datos: list
             WHERE id = %s
             LIMIT 1
         """
+        sql_delete_fantasmas = """
+            DELETE FROM rh.consolidado_incidencias
+            WHERE employee_id = %s
+              AND id != %s
+              AND start_date <= %s
+              AND end_date >= %s
+        """
 
         insertados = 0
         actualizados = 0
         duplicados = 0
         errores = 0
         omitidos_sin_empleado = 0
+        fantasmas_eliminados = 0
 
         for item in datos:
             try:
@@ -225,7 +236,10 @@ def crear_e_insertar_tablas_incidencias(conexion, nombre_tabla: str, datos: list
                             days_count,
                             item.get("day_percent"),
                             type_permission,
+                            start_date,
+                            end_date,
                             item.get("status"),
+                            created_at,
                             id_evento,
                         ),
                     )
@@ -250,6 +264,19 @@ def crear_e_insertar_tablas_incidencias(conexion, nombre_tabla: str, datos: list
                     )
                     insertados += 1
 
+                if start_date is not None and end_date is not None:
+                    cursor.execute(
+                        sql_delete_fantasmas,
+                        (employee_id, id_evento, start_date, end_date),
+                    )
+                    eliminados = cursor.rowcount
+                    if eliminados > 0:
+                        fantasmas_eliminados += eliminados
+                        logger.warning(
+                            f"Eliminados {eliminados} registro(s) fantasma solapado(s) "
+                            f"para employee_id={employee_id} (reemplazados por id={id_evento})"
+                        )
+
                 cursor.execute("RELEASE SAVEPOINT sp_incidencia")
             except Exception as e_row:
                 cursor.execute("ROLLBACK TO SAVEPOINT sp_incidencia")
@@ -267,7 +294,8 @@ def crear_e_insertar_tablas_incidencias(conexion, nombre_tabla: str, datos: list
         logger.info(
             "Carga de incidencias finalizada. "
             f"Inserts: {insertados}, Updates: {actualizados}, Duplicados omitidos: {duplicados}, Errores: {errores}. "
-            f"Omitidos por employee_id no existente en employees: {omitidos_sin_empleado}."
+            f"Omitidos por employee_id no existente en employees: {omitidos_sin_empleado}. "
+            f"Fantasmas eliminados por solapamiento: {fantasmas_eliminados}."
         )
     except Exception as e:
         conexion.rollback()
@@ -331,8 +359,10 @@ def job_sincronizar_empleados(empleados_filtrados_api: list, conexion):
         cursor = conexion.cursor()
         logger.info("Conectado a PostgreSQL (schema rh).")
 
-        logger.info("Insertando/Actualizando empleados en la tabla rh.employees...")
+        logger.info(f"Iniciando carga en 'rh.employees'. Empleados a procesar: {len(empleados_filtrados)}")
         procesados = 0
+        insertados = 0
+        actualizados = 0
         errores = 0
 
         sql_upsert = """
@@ -398,6 +428,7 @@ def job_sincronizar_empleados(empleados_filtrados_api: list, conexion):
                 ctrlit_recinto = EXCLUDED.ctrlit_recinto,
                 picture_url = EXCLUDED.picture_url,
                 updated_at = NOW()
+            RETURNING (xmax = 0) AS inserted
         """
 
         logger.info("=== MUESTRA DE DATOS ANTES DE INSERTAR ===")
@@ -432,11 +463,15 @@ def job_sincronizar_empleados(empleados_filtrados_api: list, conexion):
                     e.get("cost_center"), e.get("ctrlit_recinto"), e.get("picture_url")
                 )
                 cursor.execute(sql_upsert, values_upsert)
+                if cursor.fetchone()[0]:
+                    insertados += 1
+                else:
+                    actualizados += 1
                 cursor.execute("RELEASE SAVEPOINT sp_empleado")
 
                 procesados += 1
                 if procesados % 100 == 0:
-                    logger.info(f"Procesados {procesados} empleados...")
+                    logger.info(f"Empleados: progreso {procesados}/{len(empleados_filtrados)}...")
                     conexion.commit() # Commit parcial
 
             except Exception as error:
@@ -454,7 +489,10 @@ def job_sincronizar_empleados(empleados_filtrados_api: list, conexion):
 
         conexion.commit() # Guarda todos los cambios finales
 
-        logger.info(f"Procesamiento completado. Total: {procesados}, Errores: {errores}")
+        logger.info(
+            f"Carga de empleados finalizada. Insertados: {insertados}, "
+            f"Actualizados: {actualizados}, Errores: {errores} (Total procesados: {procesados})."
+        )
         logger.info(f"Empleados con area_id no existente en rh.areas (guardados con NULL): {empleados_con_area_invalida}")
 
         logger.info(
@@ -480,16 +518,16 @@ def cargar_datos_areas(conexion, areas_datos):
     Realiza la carga (Upsert: Insertar o Actualizar) de los datos en SQL Server.
     """
     if not areas_datos:
-        print("No hay datos para cargar.")
+        logger.warning("No hay datos de áreas para cargar. Omitiendo.")
         return
 
     cursor = conexion.cursor()
-    print(f"Iniciando carga de {len(areas_datos)} registros en BD...")
-    
+    logger.info(f"Iniciando carga en 'rh.areas'. Registros recibidos: {len(areas_datos)}")
+
     # Contadores
     stats = {"insert": 0, "update": 0, "error": 0}
 
-    # Query preparada (upsert PostgreSQL)
+    # Query preparada (upsert PostgreSQL). RETURNING (xmax = 0) distingue insert (TRUE) de update (FALSE).
     sql_upsert = """
         INSERT INTO rh.areas (
             id, name, address, first_level_id, first_level_name,
@@ -506,6 +544,7 @@ def cargar_datos_areas(conexion, areas_datos):
             status = EXCLUDED.status,
             city = EXCLUDED.city,
             updated_at = NOW()
+        RETURNING (xmax = 0) AS inserted
     """
 
     try:
@@ -520,13 +559,16 @@ def cargar_datos_areas(conexion, areas_datos):
                     area["second_level_id"], area["second_level_name"],
                     area["cost_center"], area["status"], area["city"]
                 ))
-                stats["insert"] += 1
+                if cursor.fetchone()[0]:
+                    stats["insert"] += 1
+                else:
+                    stats["update"] += 1
                 cursor.execute("RELEASE SAVEPOINT sp_area")
-                
+
                 # Commit parcial cada 50 registros para no saturar el log de transacciones
                 if (i + 1) % 50 == 0:
                     conexion.commit()
-                    print(f"   Progreso: {i + 1}/{len(areas_datos)}...")
+                    logger.info(f"Áreas: progreso {i + 1}/{len(areas_datos)}...")
 
             except Exception as e_row:
                 cursor.execute("ROLLBACK TO SAVEPOINT sp_area")
@@ -537,14 +579,17 @@ def cargar_datos_areas(conexion, areas_datos):
                     payload=area,
                     error=e_row,
                 )
-                print(f"   Error en ID {area.get('id')}: {e_row}")
+                logger.exception(f"Error procesando área id={area.get('id')}: {e_row}")
                 stats["error"] += 1
 
         conexion.commit() # Commit final
-        print(f"\nCarga completada: {stats['insert']} Inserts, {stats['update']} Updates, {stats['error']} Errores.")
+        logger.info(
+            f"Carga de áreas finalizada. Insertadas: {stats['insert']}, "
+            f"Actualizadas: {stats['update']}, Errores: {stats['error']}."
+        )
 
     except Exception as e:
-        print(f"Error general en la carga: {e}")
+        logger.exception(f"Error general en la carga de áreas: {e}")
         conexion.rollback()
     finally:
         cursor.close()
@@ -553,15 +598,16 @@ def cargar_datos_areas(conexion, areas_datos):
 def cargar_datos_vacaciones(conexion, vacaciones_datos, batch_size=50):
     
     if not vacaciones_datos:
-        print("No hay datos para cargar.")
-        return 
+        logger.warning("No hay datos de vacaciones para cargar. Omitiendo.")
+        return
 
     cursor = conexion.cursor()
-    print(f"Iniciando carga de {len(vacaciones_datos)} registros en BD...")
-    
+    logger.info(f"Iniciando carga en 'rh.vacations'. Registros recibidos: {len(vacaciones_datos)}")
+
     # Contadores
     stats = {"insert": 0, "update": 0, "error": 0}
 
+    # RETURNING (xmax = 0) distingue insert (TRUE) de update (FALSE).
     sql_upsert = """
         INSERT INTO rh.vacations (
             id, employee_id, working_days, workday_stage, type, status,
@@ -576,6 +622,7 @@ def cargar_datos_vacaciones(conexion, vacaciones_datos, batch_size=50):
             start_date = EXCLUDED.start_date,
             end_date = EXCLUDED.end_date,
             updated_at = NOW()
+        RETURNING (xmax = 0) AS inserted
     """
 
     def limpiar_fecha(fecha_str, es_solo_fecha=False):
@@ -617,13 +664,16 @@ def cargar_datos_vacaciones(conexion, vacaciones_datos, batch_size=50):
                     end_date_clean,
                 ),
             )
-            stats["insert"] += 1
+            if cursor.fetchone()[0]:
+                stats["insert"] += 1
+            else:
+                stats["update"] += 1
             cursor.execute("RELEASE SAVEPOINT sp_vacacion")
-            
+
             if (index + 1) % batch_size == 0:
                 conexion.commit()
-                time.sleep(0.1) 
-                print(f"   ... Lote procesado: {index + 1} registros guardados.")
+                time.sleep(0.1)
+                logger.info(f"Vacaciones: lote procesado, {index + 1}/{len(vacaciones_datos)} registros guardados.")
 
         except Exception as e:
             cursor.execute("ROLLBACK TO SAVEPOINT sp_vacacion")
@@ -637,21 +687,33 @@ def cargar_datos_vacaciones(conexion, vacaciones_datos, batch_size=50):
             # Detección específica de caída de red
             msg_error = str(e)
             if '08S01' in msg_error or 'Communication link failure' in msg_error:
-                print(f"¡ALERTA CRÍTICA! Se perdió la conexión en el registro {vac.get('id')}.")
-                print("Intenta reducir el tamaño del lote o revisar la VPN/Internet.")
+                logger.error(f"¡ALERTA CRÍTICA! Conexión perdida en el registro id={vac.get('id')}. Revisar VPN/Internet o reducir el tamaño del lote.")
+                # Persistir los registros NO procesados (el actual ya quedó arriba) para retry posterior
+                restantes = vacaciones_datos[index + 1:]
+                for vac_pendiente in restantes:
+                    _registrar_error_fila(
+                        entidad="vacations",
+                        clave=str(vac_pendiente.get("employee_id", vac_pendiente.get("id", "sin_id"))),
+                        payload=vac_pendiente,
+                        error=Exception("No procesado: conexión perdida durante la carga del lote."),
+                    )
+                if restantes:
+                    logger.warning(f"Vacaciones: persistidos {len(restantes)} registros pendientes en archivo de errores para retry.")
                 # Aquí podrías implementar una lógica de reconexión si tuvieras la connection string
                 break # Rompemos el ciclo porque la conexión ya no sirve
-            
+
             # Error de datos normal
-            print(f"\nERROR SQL - ID REGISTRO: {vac.get('id')}")
-            print(f"Mensaje Técnico: {e}")
+            logger.exception(f"Error procesando vacación id={vac.get('id')}: {e}")
             stats["error"] += 1
 
     try:
         conexion.commit() # Un solo commit al final es mucho más rápido
-        print(f"\nCarga completada: {stats['insert']} Inserts, {stats['update']} Updates, {stats['error']} Errores.")
+        logger.info(
+            f"Carga de vacaciones finalizada. Insertadas: {stats['insert']}, "
+            f"Actualizadas: {stats['update']}, Errores: {stats['error']}."
+        )
     except Exception as e:
-        print(f"Error al hacer commit final: {e}")
+        logger.exception(f"Error al hacer commit final de vacaciones: {e}")
         conexion.rollback()
     finally:
         cursor.close()
@@ -666,17 +728,27 @@ def cargar_datos_job_history(conexion, jobs_datos, batch_size=100):
     Filas sin empleado vigente se omiten. boss_id se resuelve igual (nullable).
     """
     if not jobs_datos:
-        print("No hay datos de historial laboral para cargar.")
+        logger.warning("No hay datos de historial laboral para cargar. Omitiendo.")
         return
 
     cursor = conexion.cursor()
-    print(f"Iniciando carga de {len(jobs_datos)} registros de historial laboral en BD...")
+    logger.info(f"Iniciando carga en 'rh.job_history'. Registros recibidos: {len(jobs_datos)}")
 
-    stats = {"insert": 0, "error": 0, "omitidos_sin_empleado": 0}
+    stats = {"insert": 0, "update": 0, "error": 0, "omitidos_sin_empleado": 0}
 
-    # Mapa person_id (API) -> employees.id vigente
-    cursor.execute("SELECT id, person_id FROM rh.employees WHERE person_id IS NOT NULL")
-    person_a_employee = {row[1]: row[0] for row in cursor.fetchall()}
+    # Mapa person_id (API) -> employees.id vigente.
+    # Un person_id puede tener varias filas en employees (re-contratación).
+    # Prioridad: status 'activo' sobre inactivo; a igualdad, el id más alto (más reciente).
+    cursor.execute("SELECT id, person_id, status FROM rh.employees WHERE person_id IS NOT NULL")
+    person_a_employee = {}
+    _mejor_por_persona = {}  # person_id -> (es_activo, id)
+    for emp_id, person_id, status in cursor.fetchall():
+        es_activo = 1 if (status or "").strip().lower() == "activo" else 0
+        candidato = (es_activo, emp_id)
+        actual = _mejor_por_persona.get(person_id)
+        if actual is None or candidato > actual:
+            _mejor_por_persona[person_id] = candidato
+            person_a_employee[person_id] = emp_id
 
     sql_upsert = """
         INSERT INTO rh.job_history (
@@ -693,6 +765,7 @@ def cargar_datos_job_history(conexion, jobs_datos, batch_size=100):
             boss_id = EXCLUDED.boss_id,
             boss_rut = EXCLUDED.boss_rut,
             updated_at = NOW()
+        RETURNING (xmax = 0) AS inserted
     """
 
     try:
@@ -721,12 +794,15 @@ def cargar_datos_job_history(conexion, jobs_datos, batch_size=100):
                         job.get("boss_rut"),
                     ),
                 )
-                stats["insert"] += 1
+                if cursor.fetchone()[0]:
+                    stats["insert"] += 1
+                else:
+                    stats["update"] += 1
                 cursor.execute("RELEASE SAVEPOINT sp_job")
 
                 if (index + 1) % batch_size == 0:
                     conexion.commit()
-                    print(f"   ... Lote procesado: {index + 1} registros.")
+                    logger.info(f"Job_history: lote procesado, {index + 1}/{len(jobs_datos)} registros.")
 
             except Exception as e_row:
                 cursor.execute("ROLLBACK TO SAVEPOINT sp_job")
@@ -742,8 +818,9 @@ def cargar_datos_job_history(conexion, jobs_datos, batch_size=100):
 
         conexion.commit()
         logger.info(
-            f"Carga de job_history finalizada. Inserts/Updates: {stats['insert']}, "
-            f"Errores: {stats['error']}, Omitidos sin empleado vigente: {stats['omitidos_sin_empleado']}."
+            f"Carga de job_history finalizada. Insertados: {stats['insert']}, "
+            f"Actualizados: {stats['update']}, Errores: {stats['error']}, "
+            f"Omitidos sin empleado vigente: {stats['omitidos_sin_empleado']}."
         )
     except Exception as e:
         conexion.rollback()
