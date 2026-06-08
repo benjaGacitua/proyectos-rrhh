@@ -172,11 +172,20 @@ def generar_alertas_contrato(conexion):
                 errores += 1
                 logger.exception(f"Error generando alerta contrato employee_id={empleado.get('id')}: {e_row}")
 
+        cursor.execute(
+            """
+            DELETE FROM rh.contract_alerts
+            WHERE employee_id NOT IN (SELECT id FROM rh.employees)
+            """
+        )
+        eliminados = cursor.rowcount
+
         conexion.commit()
         logger.info(
-            f"Alertas de contrato finalizadas. Procesados: {procesados}, Alertas upsert: {alertas}, Errores: {errores}."
+            f"Alertas de contrato finalizadas. Procesados: {procesados}, Alertas upsert: {alertas}, "
+            f"Errores: {errores}, Huérfanos eliminados: {eliminados}."
         )
-        return {"procesados": procesados, "alertas": alertas, "errores": errores}
+        return {"procesados": procesados, "alertas": alertas, "errores": errores, "eliminados": eliminados}
     except Exception as e:
         conexion.rollback()
         logger.exception(f"Error en generacion de alertas de contrato: {e}")
