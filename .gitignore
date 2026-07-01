@@ -6,6 +6,7 @@ venv/
 .DS_Store
 estado_sincronizacion.json
 app/utils/temp/
+procedures/refresh_kpi_inasistencias.sql
 
 # AGREGAR ESTO:
 certs/
