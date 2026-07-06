@@ -270,11 +270,14 @@ def obtener_todos_los_empleados_filtrados(url_employees: str = settings.API_BASE
             time.sleep(0.5)
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error en la petición API: {e}")
-            break
+            # Paginación incompleta: NO devolver datos parciales silenciosamente.
+            # Aguas abajo la reconciliación marca 'eliminado' a los ausentes; un set
+            # truncado desactivaría empleados reales en masa. Abortar el flujo.
+            logger.error(f"Error en la petición API (página {pagina_actual}): {e}")
+            raise
         except Exception as api_ex:
             logger.exception(f"Error procesando datos de la API: {api_ex}")
-            break # Detener si hay un error inesperado al procesar la respuesta
+            raise # Detener si hay un error inesperado al procesar la respuesta
 
     logger.info(f"¡Paginación completada! Total de empleados filtrados: {len(empleados_filtrados)}")
     return empleados_filtrados

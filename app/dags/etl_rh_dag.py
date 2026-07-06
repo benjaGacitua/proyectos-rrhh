@@ -152,17 +152,19 @@ def _etl_employees():
 
     conn = get_db_connection()
     try:
+        # Extraemos una vez para reutilizar el set completo en la reconciliación.
+        empleados_api = extract.obtener_todos_los_empleados_filtrados(settings.API_BASE_URL)
         exito = ejecutar_flujo_etl(
             nombre_entidad="employees",
-            funcion_extraccion=lambda: extract.obtener_todos_los_empleados_filtrados(
-                settings.API_BASE_URL
-            ),
+            funcion_extraccion=lambda: empleados_api,
             # job_sincronizar_empleados recibe (data, conn), etl_core pasa (conn, data)
             funcion_carga=lambda conn, data: load.job_sincronizar_empleados(data, conn),
             conexion_db=conn,
         )
         if not exito:
             raise RuntimeError("ETL employees terminó con errores — revisar staging.")
+        # Marca 'eliminado' a los borrados del origen (ausentes de la API).
+        load.desactivar_empleados_ausentes(conn, empleados_api)
     finally:
         conn.close()
 

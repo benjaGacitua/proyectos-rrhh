@@ -70,17 +70,21 @@ def main():
         if tarea_ya_completada(tarea_emp):
             logger.info(f"Saltando '{tarea_emp}': Ya se completó hoy.")
         else:
+            # Extraemos una vez para reutilizar el set completo en la reconciliación.
+            # (etl_core no retorna los datos; los necesitamos para marcar ausentes.)
+            empleados_api = extract.obtener_todos_los_empleados_filtrados(settings.API_BASE_URL)
             exito_emp = ejecutar_flujo_etl(
                 nombre_entidad="employees",
-                # Usamos lambda para pasar argumentos fijos (URL)
-                funcion_extraccion=lambda: extract.obtener_todos_los_empleados_filtrados(settings.API_BASE_URL),
+                funcion_extraccion=lambda: empleados_api,
                 # La función de carga original ya recibe (data, conexion), pero etl_core pasa (conexion, data)
                 # Asegúrate que el orden coincida o usa lambda para invertir:
                 funcion_carga=lambda conn, data: load.job_sincronizar_empleados(data, conn),
                 conexion_db=conexion
             )
-            
+
             if exito_emp:
+                # Marca 'eliminado' a los borrados del origen (ausentes de la API).
+                load.desactivar_empleados_ausentes(conexion, empleados_api)
                 marcar_tarea(tarea_emp, exito=True)
             else:
                 marcar_tarea(tarea_emp, exito=False, error_msg="Fallo en flujo ETL employees")

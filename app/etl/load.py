@@ -512,6 +512,102 @@ def job_sincronizar_empleados(empleados_filtrados_api: list, conexion):
 
     logger.info(f"SINCRONIZACIÓN FINALIZADA: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
+
+def _normalizar_rut(rut) -> str | None:
+    """Normaliza RUT para comparación: sin puntos/espacios, minúscula. None si vacío/'-'."""
+    if rut is None:
+        return None
+    s = str(rut).strip().lower().replace(".", "").replace(" ", "")
+    if not s or s == "-":
+        return None
+    return s
+
+
+def desactivar_empleados_ausentes(conexion, empleados_api: list, umbral_pct: float = 0.30):
+    """Marca status='eliminado' a empleados borrados del origen (ausentes de la API).
+
+    Presente = su id está en la API O su rut (normalizado) está en la API. El
+    endpoint devuelve activo E inactivo, así que ausente = borrado del sistema.
+    Se evalúan todas las filas no-eliminadas (un borrado puede estar hoy activo o inactivo).
+
+    Guard: si desactivaría más de umbral_pct del total no-eliminado (o la API vino
+    vacía) NO desactiva y loguea WARNING — protege contra un fetch parcial/anómalo.
+
+    Devuelve la lista de (id, rut) marcados como eliminado.
+    """
+    if not empleados_api:
+        logger.warning("desactivar_empleados_ausentes: API sin empleados — se omite (guard).")
+        return []
+
+    ids_api = {e.get("id") for e in empleados_api if e.get("id") is not None}
+    ruts_api = {_normalizar_rut(e.get("rut")) for e in empleados_api}
+    ruts_api.discard(None)
+
+    cursor = conexion.cursor()
+    try:
+        cursor.execute("SELECT id, rut FROM rh.employees WHERE status <> 'eliminado'")
+        filas = cursor.fetchall()
+        total_no_eliminado = len(filas)
+
+        candidatos = [
+            (emp_id, rut)
+            for emp_id, rut in filas
+            if emp_id not in ids_api and _normalizar_rut(rut) not in ruts_api
+        ]
+
+        if not candidatos:
+            logger.info("desactivar_empleados_ausentes: sin empleados ausentes que marcar.")
+            return []
+
+        if total_no_eliminado and len(candidatos) > umbral_pct * total_no_eliminado:
+            logger.warning(
+                f"desactivar_empleados_ausentes: {len(candidatos)}/{total_no_eliminado} "
+                f"candidatos supera el umbral ({umbral_pct:.0%}) — NO se desactiva. "
+                "Probable fetch parcial/anómalo de la API."
+            )
+            return []
+
+        ids_a_marcar = [emp_id for emp_id, _ in candidatos]
+        cursor.execute(
+            "UPDATE rh.employees SET status='eliminado', updated_at=NOW() WHERE id = ANY(%s)",
+            (ids_a_marcar,),
+        )
+        conexion.commit()
+        logger.info(f"desactivar_empleados_ausentes: {len(candidatos)} empleados marcados 'eliminado'.")
+
+        _notificar_eliminados(candidatos)
+        return candidatos
+
+    except Exception as e:
+        conexion.rollback()
+        logger.exception(f"Error en desactivar_empleados_ausentes: {e}")
+        raise
+    finally:
+        cursor.close()
+
+
+def _notificar_eliminados(eliminados: list):
+    """Envía la lista de id+rut marcados 'eliminado' por Telegram (webhook n8n)."""
+    if not eliminados:
+        return
+    # ponytail: cap a 50 líneas para no reventar el mensaje de Telegram.
+    lineas = [f"id={i} rut={r}" for i, r in eliminados[:50]]
+    detalle = "\n".join(lineas)
+    if len(eliminados) > 50:
+        detalle += f"\n(y {len(eliminados) - 50} más)"
+    try:
+        from app.utils import telegram_notifier
+        telegram_notifier.notificar_tarea(
+            state="empleados_eliminados",
+            dag_id="etl_rh",
+            task_id="desactivar_empleados_ausentes",
+            run_id=datetime.now().strftime("%Y-%m-%d"),
+            log_excerpt=f"{len(eliminados)} empleados marcados 'eliminado':\n{detalle}",
+        )
+    except Exception as exc:
+        logger.warning(f"No se pudo notificar empleados eliminados: {exc}")
+
+
 #! /// Load de tabla areas --> Relacionada con función extract.obtener_datos_tabla_areas ///
 def cargar_datos_areas(conexion, areas_datos):
     """
