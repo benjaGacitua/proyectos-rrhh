@@ -3,21 +3,26 @@ DAG: etl_rh_cramer
 Orquesta el ETL diario RH: BUK API → PostgreSQL (vía túnel SSH).
 
 Dependencias entre tareas:
-    garantizar_tablas ─┬─ check_inicio_mes → etl_settlements_chile ────────────────────────────────┐
-                       └─ etl_areas → etl_employees ─┬─ etl_vacaciones                             ├─→ notificar_resumen (ALL_DONE)
+    garantizar_tablas ─┬─ check_inicio_mes → etl_settlements_chile ──┬──────────────────────────────┐
+                       └─ etl_areas → etl_employees ─┬─ etl_vacaciones│                             ├─→ notificar_resumen (ALL_DONE)
                                                       ├─ etl_contract_alerts                        │
                                                       ├─ etl_sync_lavanderia ───────────────────────┤
                                                       ├─ etl_job_history ───────────────────────────┤
-                                                      └─ etl_incidencias ─┬─ refresh_ausentismo ────┤
-                                                                           ├─ refresh_kpi_mensual ───┤
-                                                                           └─ refresh_kpi_semanal ───┘
+                                                      ├─ etl_incidencias ─┬─ refresh_ausentismo ────┤
+                                                      │                   ├─ refresh_kpi_mensual ───┤
+                                                      │                   └─ refresh_kpi_semanal ───┤
+                                                      └──────────────────┘+settlements→refresh_costos┘
 
     check_inicio_mes: ShortCircuitOperator — solo días 1-5 del mes.
-    En días 6+, etl_settlements_chile queda en 'skipped' (no cuenta como error).
+    En días 6+, etl_settlements_chile y refresh_costos quedan en 'skipped'.
 
     Bloque KPI (refresh_ausentismo, refresh_kpi_mensual, refresh_kpi_semanal):
     Corre en paralelo después de etl_incidencias, ya que depende de datos frescos
     de consolidado_incidencias y employees.
+
+    refresh_costos (mv_costos_colaboradores + mv_jerarquia_jefatura):
+    Solo corre cuando etl_settlements_chile Y etl_employees terminaron correctamente
+    (ambos deben estar en 'success'). En días 6+ queda en 'skipped'.
 
 Todas las importaciones del dominio (app.*) se realizan dentro de cada
 callable para evitar ejecuciones en tiempo de parseo del DAG.
@@ -302,6 +307,19 @@ def _refresh_kpi_semanal():
         conn.close()
 
 
+def _refresh_costos():
+    from app.utils.db_client import get_db_connection
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("REFRESH MATERIALIZED VIEW costos.mv_costos_colaboradores;")
+            cur.execute("REFRESH MATERIALIZED VIEW costos.mv_jerarquia_jefatura;")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _notificar_resumen(**context):
     """Tarea final: envía resumen global del DAG run a Telegram."""
     from airflow.utils.state import State
@@ -324,6 +342,7 @@ def _notificar_resumen(**context):
         "refresh_ausentismo",
         "refresh_kpi_mensual",
         "refresh_kpi_semanal",
+        "refresh_costos",
     ]
 
     task_instances = {t.task_id: t for t in dag_run.get_task_instances()}
@@ -435,6 +454,11 @@ with DAG(
         python_callable=_refresh_kpi_semanal,
     )
 
+    t_refresh_costos = PythonOperator(
+        task_id="refresh_costos",
+        python_callable=_refresh_costos,
+    )
+
     t_resumen = PythonOperator(
         task_id="notificar_resumen",
         python_callable=_notificar_resumen,
@@ -443,7 +467,7 @@ with DAG(
     )
 
     # Flujo mensual: corre en paralelo al bloque diario, ambos arrancan desde t_ddl
-    t_ddl >> t_check_mes >> t_settlements >> t_resumen
+    t_ddl >> t_check_mes >> t_settlements
 
     # Flujo diario (áreas primero porque employees valida area_id)
     t_ddl >> t_areas >> t_employees >> [t_vacaciones, t_incidencias, t_alerts, t_sync_lavanderia, t_job_history]
@@ -452,5 +476,10 @@ with DAG(
     # (t_employees ya terminó porque t_incidencias depende de él)
     t_incidencias >> [t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal]
 
+    # Costos: requiere settlements frescos + employees frescos; queda skipped en días 6+
+    [t_settlements, t_employees] >> t_refresh_costos
+
     # Todo converge en el resumen
-    [t_vacaciones, t_alerts, t_sync_lavanderia, t_job_history, t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal] >> t_resumen
+    [t_settlements, t_vacaciones, t_alerts, t_sync_lavanderia, t_job_history,
+     t_refresh_ausentismo, t_refresh_kpi_mensual, t_refresh_kpi_semanal,
+     t_refresh_costos] >> t_resumen
