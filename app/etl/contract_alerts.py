@@ -32,6 +32,17 @@ def _calcular_alerta_contrato(empleado: dict):
     if not active_since or tipo_contrato != "fijo" or not plazo_1:
         return None
 
+    # plazo_2 solo es valido si es posterior a plazo_1. Si es <= (o duplica plazo_1,
+    # como en datos de Buk sin segundo termino real), el contrato es de un solo termino
+    # -> INDEFINIDO@plazo_1. Sin esto, un plazo_2==plazo_1 clasifica SEGUNDO_PLAZO y el
+    # INDEFINIDO solo se materializa tras pasar la fecha, ya fuera de la ventana de envio.
+    if plazo_2 and plazo_2 <= plazo_1:
+        plazo_2 = None
+
+    hoy = datetime.now().date()
+
+    # Buk mueve date_2->date_1 y deja date_2=NULL al renovar a segundo plazo, asi que la
+    # transicion a INDEFINIDO la hace el shift de datos (rama else), no logica de fecha aca.
     if plazo_2:
         motivo = "Renovacion a segundo plazo"
         tipo_alerta = "SEGUNDO_PLAZO"
@@ -41,7 +52,6 @@ def _calcular_alerta_contrato(empleado: dict):
         tipo_alerta = "INDEFINIDO"
         fecha_alerta = plazo_1
 
-    hoy = datetime.now().date()
     return {
         "alert_date": fecha_alerta,
         "alert_type": tipo_alerta,
