@@ -47,7 +47,7 @@ API_ENDPOINTS = {
 FILTRAR_POR_FECHAS = True # Cambiar a False si quieres traer todo
 
 fecha_hoy = datetime.now().date()
-fecha_inicio_objetivo = fecha_hoy - timedelta(days=7)
+fecha_inicio_objetivo = fecha_hoy - timedelta(days=14)
 
 FECHA_INICIO = fecha_inicio_objetivo.strftime("%Y-%m-%d")
 FECHA_FIN = fecha_hoy.strftime("%Y-%m-%d")

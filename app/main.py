@@ -161,6 +161,13 @@ def main():
                     load.crear_e_insertar_tablas_incidencias(
                         conexion, "consolidado_incidencias", incidencias_consolidadas
                     )
+                    # Borra fantasmas: en DB dentro de la ventana pero ausentes en la API (borradas en origen).
+                    load.eliminar_incidencias_ausentes(
+                        conexion,
+                        incidencias_consolidadas,
+                        fecha_inicio=settings.FECHA_INICIO if settings.FILTRAR_POR_FECHAS else None,
+                        fecha_fin=settings.FECHA_FIN if settings.FILTRAR_POR_FECHAS else None,
+                    )
                     marcar_tarea(tarea_incidencias, exito=True)
                     load.reintentar_errores_entidad(conexion, "consolidado_incidencias")
                 except Exception as e:

@@ -180,14 +180,21 @@ def _etl_vacaciones():
     from app.etl import extract, load
     from app.utils.etl_core import ejecutar_flujo_etl
 
+    DIAS_ATRAS_VACACIONES = 91  # debe coincidir con la ventana de fetch y el cutoff de borrado
     conn = get_db_connection()
     try:
+        vacaciones_api = extract.obtener_datos_vacaciones(
+            settings.API_BASE_URL, dias_atras=DIAS_ATRAS_VACACIONES
+        )
         exito = ejecutar_flujo_etl(
             nombre_entidad="vacaciones",
-            funcion_extraccion=lambda: extract.obtener_datos_vacaciones(settings.API_BASE_URL),
+            funcion_extraccion=lambda: vacaciones_api,
             funcion_carga=load.cargar_datos_vacaciones,
             conexion_db=conn,
         )
+        # Borra fantasmas dentro de la ventana fetcheada (end_date >= hoy-91).
+        cutoff = (datetime.now().date() - timedelta(days=DIAS_ATRAS_VACACIONES)).strftime("%Y-%m-%d")
+        load.eliminar_vacaciones_ausentes(conn, vacaciones_api, cutoff_end_date=cutoff)
         load.reintentar_errores_entidad(conn, "vacations")
         if not exito:
             raise RuntimeError("ETL vacaciones terminó con errores — revisar staging.")
@@ -236,6 +243,12 @@ def _etl_incidencias():
             incidencias.extend(datos)
 
         load.crear_e_insertar_tablas_incidencias(conn, "consolidado_incidencias", incidencias)
+        load.eliminar_incidencias_ausentes(
+            conn,
+            incidencias,
+            fecha_inicio=settings.FECHA_INICIO if settings.FILTRAR_POR_FECHAS else None,
+            fecha_fin=settings.FECHA_FIN if settings.FILTRAR_POR_FECHAS else None,
+        )
         load.reintentar_errores_entidad(conn, "consolidado_incidencias")
     finally:
         conn.close()

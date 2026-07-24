@@ -410,7 +410,7 @@ def obtener_historial_laboral_completo(url_employees: str = settings.API_BASE_UR
 #! \\\ ======================================================================================= \\\
 
 #! /// Extracción Vacaciones ///
-def obtener_datos_vacaciones(url_vacaciones: str = settings.API_BASE_URL):
+def obtener_datos_vacaciones(url_vacaciones: str = settings.API_BASE_URL, dias_atras: int = 91):
 
     retry_strategy = Retry(
         total=3,  # Número de reintentos
@@ -427,7 +427,7 @@ def obtener_datos_vacaciones(url_vacaciones: str = settings.API_BASE_URL):
     headers = {"auth_token": settings.TOKEN}
 
     fecha_fin = datetime.now().date()
-    fecha_inicio = fecha_fin - timedelta(days=91)  # ~3 meses
+    fecha_inicio = fecha_fin - timedelta(days=dias_atras)  # ventana end_after
 
     url_base = url_vacaciones + "vacations"
     url_actual = f"{url_base}?end_after={fecha_inicio}&page_size=100"

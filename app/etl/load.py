@@ -608,6 +608,166 @@ def _notificar_eliminados(eliminados: list):
         logger.warning(f"No se pudo notificar empleados eliminados: {exc}")
 
 
+def eliminar_incidencias_ausentes(
+    conexion,
+    incidencias_api: list,
+    fecha_inicio: str = None,
+    fecha_fin: str = None,
+    umbral_pct: float = 0.30,
+):
+    """Borra (hard delete) incidencias fantasma: presentes en DB pero ya borradas del origen.
+
+    Espejo de desactivar_empleados_ausentes, pero acotado a la ventana [fecha_inicio,
+    fecha_fin] que consultó la API. La extracción de incidencias es ventaneada
+    (FILTRAR_POR_FECHAS): fuera de esa ventana la API no devuelve nada, así que la
+    ausencia de un id sólo significa "borrado" para filas que solapan la ventana
+    (start_date <= to AND end_date >= from). Filas históricas fuera de ventana NO se tocan.
+
+    Si fecha_inicio/fecha_fin son None se asume extracción completa (universo entero).
+
+    Guard: si borraría más de umbral_pct de las filas en ventana (o la API vino vacía)
+    NO borra y loguea WARNING — protege contra un fetch parcial/anómalo.
+
+    Devuelve la lista de ids borrados.
+    """
+    if not incidencias_api:
+        logger.warning("eliminar_incidencias_ausentes: API sin incidencias — se omite (guard).")
+        return []
+
+    ids_api = {int(i["id"]) for i in incidencias_api if i.get("id") is not None}
+    if not ids_api:
+        logger.warning("eliminar_incidencias_ausentes: sin ids válidos en API — se omite.")
+        return []
+
+    cursor = conexion.cursor()
+    try:
+        if fecha_inicio and fecha_fin:
+            # Overlap con la ventana. Filas con start/end NULL quedan fuera (no se borran).
+            cursor.execute(
+                """
+                SELECT id
+                FROM rh.consolidado_incidencias
+                WHERE start_date <= %s::date AND end_date >= %s::date
+                """,
+                (fecha_fin, fecha_inicio),
+            )
+        else:
+            cursor.execute("SELECT id FROM rh.consolidado_incidencias")
+
+        ids_ventana = [row[0] for row in cursor.fetchall()]
+        total_ventana = len(ids_ventana)
+
+        candidatos = [i for i in ids_ventana if i not in ids_api]
+
+        if not candidatos:
+            logger.info("eliminar_incidencias_ausentes: sin incidencias fantasma que borrar.")
+            return []
+
+        if total_ventana and len(candidatos) > umbral_pct * total_ventana:
+            logger.warning(
+                f"eliminar_incidencias_ausentes: {len(candidatos)}/{total_ventana} "
+                f"candidatos supera el umbral ({umbral_pct:.0%}) — NO se borra. "
+                "Probable fetch parcial/anómalo de la API."
+            )
+            return []
+
+        cursor.execute(
+            "DELETE FROM rh.consolidado_incidencias WHERE id = ANY(%s)",
+            (candidatos,),
+        )
+        conexion.commit()
+        logger.warning(
+            f"eliminar_incidencias_ausentes: {len(candidatos)} incidencia(s) fantasma borrada(s) "
+            f"(ausentes en API dentro de ventana). ids={candidatos[:50]}"
+            + (f" (y {len(candidatos) - 50} más)" if len(candidatos) > 50 else "")
+        )
+        return candidatos
+
+    except Exception as e:
+        conexion.rollback()
+        logger.exception(f"Error en eliminar_incidencias_ausentes: {e}")
+        raise
+    finally:
+        cursor.close()
+
+
+def eliminar_vacaciones_ausentes(
+    conexion,
+    vacaciones_api: list,
+    cutoff_end_date: str = None,
+    umbral_pct: float = 0.30,
+):
+    """Borra (hard delete) vacaciones fantasma: presentes en DB pero ya borradas del origen.
+
+    Espejo de eliminar_incidencias_ausentes. La extracción de vacaciones es ventaneada
+    por end_after (end_date >= cutoff_end_date), así que la ausencia de un id solo
+    significa "borrado" para filas dentro de esa ventana. Filas con end_date < cutoff
+    (fuera de fetch) NO se tocan; las de end_date NULL tampoco.
+
+    cutoff_end_date None => barrido completo (universo entero), para el sweep inicial.
+
+    Guard: si borraría más de umbral_pct de las filas en ventana (o la API vino vacía)
+    NO borra y loguea WARNING — protege contra un fetch parcial/anómalo.
+
+    Devuelve la lista de ids borrados.
+    """
+    if not vacaciones_api:
+        logger.warning("eliminar_vacaciones_ausentes: API sin vacaciones — se omite (guard).")
+        return []
+
+    ids_api = {int(v["id"]) for v in vacaciones_api if v.get("id") is not None}
+    if not ids_api:
+        logger.warning("eliminar_vacaciones_ausentes: sin ids válidos en API — se omite.")
+        return []
+
+    cursor = conexion.cursor()
+    try:
+        if cutoff_end_date:
+            # Misma ventana que el fetch (end_after). end_date NULL queda fuera.
+            cursor.execute(
+                "SELECT id FROM rh.vacations WHERE end_date >= %s::date",
+                (cutoff_end_date,),
+            )
+        else:
+            cursor.execute("SELECT id FROM rh.vacations")
+
+        ids_ventana = [row[0] for row in cursor.fetchall()]
+        total_ventana = len(ids_ventana)
+
+        candidatos = [i for i in ids_ventana if i not in ids_api]
+
+        if not candidatos:
+            logger.info("eliminar_vacaciones_ausentes: sin vacaciones fantasma que borrar.")
+            return []
+
+        if total_ventana and len(candidatos) > umbral_pct * total_ventana:
+            logger.warning(
+                f"eliminar_vacaciones_ausentes: {len(candidatos)}/{total_ventana} "
+                f"candidatos supera el umbral ({umbral_pct:.0%}) — NO se borra. "
+                "Probable fetch parcial/anómalo de la API."
+            )
+            return []
+
+        cursor.execute(
+            "DELETE FROM rh.vacations WHERE id = ANY(%s)",
+            (candidatos,),
+        )
+        conexion.commit()
+        logger.warning(
+            f"eliminar_vacaciones_ausentes: {len(candidatos)} vacación(es) fantasma borrada(s) "
+            f"(ausentes en API dentro de ventana). ids={candidatos[:50]}"
+            + (f" (y {len(candidatos) - 50} más)" if len(candidatos) > 50 else "")
+        )
+        return candidatos
+
+    except Exception as e:
+        conexion.rollback()
+        logger.exception(f"Error en eliminar_vacaciones_ausentes: {e}")
+        raise
+    finally:
+        cursor.close()
+
+
 #! /// Load de tabla areas --> Relacionada con función extract.obtener_datos_tabla_areas ///
 def cargar_datos_areas(conexion, areas_datos):
     """
